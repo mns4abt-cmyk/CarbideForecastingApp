@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Wolfram Carbide Marktradar – Preisprognose China / EU</title>
+<link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+<div id="app">
+
+  <div id="toast" class="toast" hidden></div>
+
+  <header class="app-header">
+    <div class="header-title">
+      <h1>Wolfram-Carbide Marktradar</h1>
+      <p>Preisprognose &amp; Szenarioanalyse für China und die EU</p>
+    </div>
+    <div class="header-meta">
+      <span class="meta-pill">Letzte Aktualisierung: <b id="lastUpdate"></b></span>
+      <span class="meta-pill meta-pill-muted">Einheit: USD / kg (WO₃)</span>
+      <span class="meta-pill meta-pill-ai" id="aiStatusPill" hidden></span>
+      <button id="refreshBtn" class="refresh-btn" type="button">
+        <span class="refresh-icon">⟳</span> Aktualisieren
+      </button>
+    </div>
+  </header>
+
+  <main class="layout">
+
+    <section class="chart-col">
+
+      <div class="card chart-card">
+        <div class="card-header">
+          <h2>Preisverlauf &amp; Szenario-Prognose (12 Monate)</h2>
+          <div class="region-toggle" id="regionToggle">
+            <button data-region="china" class="region-btn">China</button>
+            <button data-region="eu" class="region-btn">EU</button>
+            <button data-region="both" class="region-btn active">Beide</button>
+          </div>
+        </div>
+
+        <div class="scenario-toggles" id="scenarioToggles"></div>
+
+        <div class="chart-wrap">
+          <svg id="priceChart"></svg>
+          <div id="chartTooltip" class="chart-tooltip"></div>
+        </div>
+
+        <div class="legend" id="chartLegend"></div>
+      </div>
+
+      <div class="card insights-card">
+        <h2>Sachliche Szenario-Einschätzungen</h2>
+        <p class="insights-sub">Erwartete Preisentwicklung in 12 Monaten je aktivem Szenario, abgeleitet aus den aktuellen Markttreibern.</p>
+        <div id="insightsList" class="insights-list"></div>
+      </div>
+
+    </section>
+
+    <aside class="news-col">
+      <div class="card news-card">
+        <h2>Voices of the Market</h2>
+        <p class="news-sub">Wichtigste Marktmeldungen. Anklicken hebt zugehörige Szenarien im Chart hervor.</p>
+        <div id="newsList" class="news-list"></div>
+      </div>
+    </aside>
+
+  </main>
+
+  <footer class="app-footer">
+    Die News im Bereich "Voices of the Market" werden bei Klick auf "Aktualisieren" live von Google
+    News abgerufen (echte Artikel, mit "Live"-Kennzeichnung) – Kategorie, Sentiment und Einschätzung
+    dazu werden per KI (Bosch Model Farm) auf Basis des Artikels generiert und sind daher
+    Einschätzungen, keine garantierten Fakten.
+  </footer>
+
+</div>
+
+<script src="js/data.js"></script>
+<script src="js/chart.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
