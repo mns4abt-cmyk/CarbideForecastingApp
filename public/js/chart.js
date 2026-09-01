@@ -14,7 +14,8 @@
   /**
    * @param {SVGSVGElement} svg
    * @param {HTMLElement} tooltipEl
-   * @param {object} cfg { labels, historyCount, series:[{id,label,color,dashed,data[]}], unit }
+   * @param {object} cfg { labels, historyCount, series:[{id,label,color,dashed,data[]}], unit,
+   *                        bands:[{id,regionLabel,color,p10[],p50[],p90[]}] }
    */
   function renderPriceChart(svg, tooltipEl, cfg) {
     while (svg.firstChild) svg.removeChild(svg.firstChild);
@@ -28,12 +29,20 @@
     const innerH = height - margin.top - margin.bottom;
 
     const { labels, historyCount, series, unit } = cfg;
+    const bands = cfg.bands || [];
     const n = labels.length;
 
-    // Y-Skala über alle sichtbaren, nicht-null Werte
+    // Y-Skala über alle sichtbaren, nicht-null Werte (Linien UND Unsicherheitsbänder)
     let min = Infinity, max = -Infinity;
     series.forEach((s) => {
       s.data.forEach((v) => {
+        if (v === null || v === undefined) return;
+        if (v < min) min = v;
+        if (v > max) max = v;
+      });
+    });
+    bands.forEach((b) => {
+      [...b.p10, ...b.p90].forEach((v) => {
         if (v === null || v === undefined) return;
         if (v < min) min = v;
         if (v > max) max = v;
@@ -89,6 +98,22 @@
     todayLabel.textContent = "Heute";
     root.appendChild(todayLabel);
 
+    // Baseline-Unsicherheitsband (P10-P90) als halbtransparente Fläche, hinter den Linien.
+    bands.forEach((b) => {
+      const topPts = [];
+      const bottomPts = [];
+      b.p90.forEach((v, i) => { if (v !== null && v !== undefined) topPts.push(`${x(i)},${y(v)}`); });
+      for (let i = b.p10.length - 1; i >= 0; i--) {
+        const v = b.p10[i];
+        if (v !== null && v !== undefined) bottomPts.push(`${x(i)},${y(v)}`);
+      }
+      if (topPts.length < 2 || bottomPts.length < 2) return;
+      root.appendChild(el("polygon", {
+        points: [...topPts, ...bottomPts].join(" "),
+        fill: b.color, opacity: 0.16, stroke: "none",
+      }));
+    });
+
     // Linien zeichnen
     series.forEach((s) => {
       const pts = [];
@@ -131,11 +156,22 @@
       cursorLine.setAttribute("x2", x(idx));
       cursorLine.setAttribute("visibility", "visible");
 
+      const baselineRows = bands
+        .filter((b) => b.p10[idx] != null && b.p50[idx] != null && b.p90[idx] != null)
+        .map((b) => `
+          <div class="tt-baseline">
+            <div class="tt-baseline-title">Baseline${bands.length > 1 ? ` (${b.regionLabel})` : ""}:</div>
+            <div class="tt-row">P10: <b>${b.p10[idx].toFixed(1)} ${unit}</b></div>
+            <div class="tt-row">P50: <b>${b.p50[idx].toFixed(1)} ${unit}</b></div>
+            <div class="tt-row">P90: <b>${b.p90[idx].toFixed(1)} ${unit}</b></div>
+          </div>`)
+        .join("");
+
       const rows = series
         .filter((s) => s.data[idx] !== null && s.data[idx] !== undefined)
         .map((s) => `<div class="tt-row"><span class="tt-dot" style="background:${s.color}"></span>${s.label}: <b>${s.data[idx].toFixed(1)} ${unit}</b></div>`)
         .join("");
-      tooltipEl.innerHTML = `<div class="tt-date">${labels[idx]}</div>${rows}`;
+      tooltipEl.innerHTML = `<div class="tt-date">${labels[idx]}</div>${baselineRows}${rows}`;
       tooltipEl.style.display = "block";
       const tw = tooltipEl.offsetWidth;
       let left = evt.clientX - rect.left + 14;

@@ -18,6 +18,10 @@
  */
 
 const path = require("path");
+const { execFile } = require("child_process");
+const { promisify } = require("util");
+
+const execFileAsync = promisify(execFile);
 
 // .env immer aus dem Ordner laden, in dem die Anwendung tatsächlich liegt - NICHT aus dem
 // aktuellen Arbeitsverzeichnis (process.cwd() kann z.B. beim Start per Doppelklick oder aus
@@ -32,6 +36,7 @@ const express = require("express");
 // sonst gibt es einen Versions-Mismatch mit Node's internem fetch ("invalid onRequestStart method").
 const { fetch, ProxyAgent } = require("undici");
 const CarbideData = require("./public/js/data.js");
+const { aggregateMarketState } = require("./lib/newsSignals");
 
 const app = express();
 app.use(express.json());
@@ -50,6 +55,98 @@ const BMF_AUTH_STYLE = (process.env.BMF_AUTH_STYLE || "subscription-key").toLowe
 // Firmenproxy: Node's fetch nutzt HTTP_PROXY/HTTPS_PROXY NICHT automatisch, daher explizit über undici ProxyAgent.
 const PROXY_URL = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy || "";
 const proxyDispatcher = PROXY_URL ? new ProxyAgent(PROXY_URL) : undefined;
+
+// ---- Python-Forecasting-Pipeline (echte Excel-Daten + Backtest-Modellauswahl) ------------
+// 1. FORECAST_PYTHON aus .env, falls gesetzt. 2. Sonst "python" (muss im PATH liegen).
+const FORECAST_PYTHON = process.env.FORECAST_PYTHON || "python";
+const FORECAST_SCRIPT = path.join(appDir, "forecasting", "pipeline.py");
+const SCENARIOS_SCRIPT = path.join(appDir, "forecasting", "scenarios.py");
+const FORECAST_TIMEOUT_MS = Number(process.env.FORECAST_TIMEOUT_MS) || 120000;
+
+// Deutsche Monatskürzel wie in public/js/data.js (buildMonthLabels), damit "YYYY-MM"-Strings
+// aus Python exakt im bisherigen Anzeigeformat erscheinen ("Sep 26" statt lokalisiertem "Sept.").
+const MONTH_NAMES_DE = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
+function formatMonthLabel(isoMonth) {
+  const [year, month] = isoMonth.split("-").map(Number);
+  return `${MONTH_NAMES_DE[month - 1]} ${String(year).slice(2)}`;
+}
+
+// Ruft "python forecasting/pipeline.py --json" per execFile auf (KEINE Shell, KEINE
+// String-Konkatenation eines Kommandos - Argumente werden als Array übergeben). Liefert das
+// vom Python-Skript auf stdout geschriebene JSON (build_frontend_payload); Python-Logging
+// geht laut Skript-Konvention ausschließlich an stderr.
+async function runForecastingPipeline() {
+  let stdout, stderr;
+  try {
+    ({ stdout, stderr } = await execFileAsync(
+      FORECAST_PYTHON,
+      [FORECAST_SCRIPT, "--json"],
+      { cwd: appDir, timeout: FORECAST_TIMEOUT_MS, maxBuffer: 20 * 1024 * 1024 }
+    ));
+  } catch (err) {
+    if (err.code === "ENOENT") {
+      throw new Error(
+        `Python-Interpreter "${FORECAST_PYTHON}" konnte nicht gestartet werden. ` +
+        `FORECAST_PYTHON in .env setzen oder sicherstellen, dass "python" im PATH liegt.`
+      );
+    }
+    if (err.killed || err.signal === "SIGTERM") {
+      throw new Error(`Forecasting-Pipeline hat das Zeitlimit von ${FORECAST_TIMEOUT_MS}ms überschritten.`);
+    }
+    const detail = (err.stderr || err.message || "").toString().trim().slice(0, 500);
+    throw new Error(`Forecasting-Pipeline (forecasting/pipeline.py) fehlgeschlagen: ${detail}`);
+  }
+
+  if (stderr && stderr.trim()) {
+    // Erwartetes Python-Logging (stderr) - nur zu Diagnosezwecken protokollieren, kein Fehler.
+    console.log("[forecasting/pipeline.py]", stderr.trim());
+  }
+
+  try {
+    return JSON.parse(stdout);
+  } catch (err) {
+    throw new Error("Forecasting-Pipeline hat kein valides JSON auf stdout geliefert.");
+  }
+}
+
+// Ruft "python forecasting/scenarios.py --current-market --json" auf, um das dynamische,
+// newsgesteuerte "currentMarket"-Szenario ("Aktuelle Marktlage") zu berechnen. china_/euScore
+// sind AUSSCHLIESSLICH marketState.china.overall / marketState.eu.overall (deterministisch aus
+// lib/newsSignals.js) - an keiner Stelle fließt ein vom LLM erzeugter Preiswert ein. Läuft als
+// eigenständiger Python-Aufruf (eigener Backtest/Fit) NACH der News-/KI-Verarbeitung, da
+// marketState erst zu diesem Zeitpunkt bekannt ist.
+async function runCurrentMarketScenario(chinaScore, euScore, available) {
+  const args = [
+    SCENARIOS_SCRIPT,
+    "--current-market",
+    "--china-score", String(chinaScore),
+    "--eu-score", String(euScore),
+    "--json",
+  ];
+  if (!available) args.push("--unavailable");
+
+  let stdout, stderr;
+  try {
+    ({ stdout, stderr } = await execFileAsync(
+      FORECAST_PYTHON,
+      args,
+      { cwd: appDir, timeout: FORECAST_TIMEOUT_MS, maxBuffer: 20 * 1024 * 1024 }
+    ));
+  } catch (err) {
+    const detail = (err.stderr || err.message || "").toString().trim().slice(0, 500);
+    throw new Error(`Aktuelle-Marktlage-Szenario (forecasting/scenarios.py) fehlgeschlagen: ${detail}`);
+  }
+
+  if (stderr && stderr.trim()) {
+    console.log("[forecasting/scenarios.py]", stderr.trim());
+  }
+
+  try {
+    return JSON.parse(stdout);
+  } catch (err) {
+    throw new Error("forecasting/scenarios.py hat kein valides JSON auf stdout geliefert.");
+  }
+}
 
 const AI_CONFIGURED = Boolean(BMF_BASE_URL && BMF_API_KEY && BMF_MODEL);
 
@@ -149,32 +246,46 @@ async function fetchRealNews(limit) {
   }));
 }
 
-// ---- Prompt: Szenario-Einschätzungen + Klassifizierung echter News in einem Aufruf ----------
+// ---- Prompt: Szenario-Einschätzungen + semantische Klassifizierung echter News -------------
+// WICHTIG: Die News-Klassifizierung ist reine semantische Ereignis-Einordnung. Das LLM darf
+// NIEMALS einen zukünftigen Preis, ein Kursziel, eine prozentuale Preisänderung oder eine
+// Prognose-Zeitreihe liefern - weder als Zahl noch im Freitext. Diese Klassifizierung fließt
+// aktuell NICHT in die numerischen Szenarien ein (siehe /api/refresh).
 function buildPrompt(realNews, scenarios) {
   const newsBlock = realNews
-    .map((n, i) => `${i}. [${n.date}] (Quelle: ${n.source}) ${n.title}`)
+    .map((n, i) => `${i}. [Datum: ${n.date}] [Quelle: ${n.source}] Titel: ${n.title}`)
     .join("\n");
   const scenarioBlock = scenarios
     .map((s) => `- ${s.id} ("${s.name}"): aktuell erwartete 12M-Änderung China ${s.expectedChange12m.china ?? 0}%, EU ${s.expectedChange12m.eu ?? 0}%`)
     .join("\n");
-  const scenarioIds = scenarios.map((s) => s.id).join(", ");
 
   return (
     `Du bist Rohstoff-Analyst für Wolfram-Carbide (China/EU-Markt). Du bekommst ausschließlich ECHTE, ` +
-    `aktuell recherchierte Nachrichtentitel (keine erfundenen Meldungen). Bewerte NUR auf Basis von Titel ` +
-    `und Quelle, erfinde keine zusätzlichen Fakten die nicht im Titel stehen.\n\n` +
-    `Echte Nachrichtentitel (Index. [Datum] (Quelle) Titel):\n${newsBlock || "(keine aktuellen Artikel gefunden)"}\n\n` +
-    `Preisszenarien mit aktuell berechneter 12-Monats-Preisänderung:\n${scenarioBlock}\n\n` +
+    `aktuell recherchierte Nachrichten-Metadaten (Titel, Quelle, Datum - keine erfundenen Meldungen, kein ` +
+    `Artikel-Volltext). Nutze für die News-Klassifizierung AUSSCHLIESSLICH diese genannten Felder ` +
+    `(Titel/Quelle/Datum, sowie Snippet falls angegeben) und erfinde keine zusätzlichen Fakten.\n\n` +
+    `Echte Nachrichten-Metadaten:\n${newsBlock || "(keine aktuellen Artikel gefunden)"}\n\n` +
+    `Preisszenarien mit aktuell berechneter 12-Monats-Preisänderung (nur als Kontext für die ` +
+    `Szenario-Einschätzungen, NICHT für die News-Klassifizierung relevant):\n${scenarioBlock}\n\n` +
     `Antworte AUSSCHLIESSLICH mit einem validen JSON-Objekt in folgender Form, ohne weiteren Text:\n` +
     `{\n` +
-    `  "scenarios": { "<scenarioId>": "<1-2 Satz sachliche Einschätzung auf Deutsch>", ... },\n` +
-    `  "news": { "<index>": { "category": "<kurze Kategorie, z.B. Angebot/Nachfrage/Regulierung>", ` +
-    `"sentiment": "bullish|bearish|neutral", "summary": "<1 sachlicher Satz NUR basierend auf dem Titel>", ` +
-    `"impact": "<1 Satz mögliche Auswirkung auf Wolfram-Carbide-Preis>", ` +
-    `"scenarios": ["<passende Szenario-ids aus: ${scenarioIds}>"] }, ... }\n` +
+    `  "scenarios": { "<scenarioId>": "<1-2 Satz sachliche Einschätzung auf Deutsch, OHNE neue Preiswerte>", ... },\n` +
+    `  "news": { "<index>": {\n` +
+    `    "category": "supply|demand|regulation|geopolitics|technology|macro|other",\n` +
+    `    "direction": "bullish|bearish|neutral",\n` +
+    `    "severity": <Zahl 0.0-1.0 - potenzielle Stärke des Marktereignisses, KEIN Prozentwert und KEINE Preisänderung>,\n` +
+    `    "confidence": <Zahl 0.0-1.0 - wie sicher du dir bei dieser Klassifizierung bist>,\n` +
+    `    "chinaRelevance": <Zahl 0.0-1.0>,\n` +
+    `    "euRelevance": <Zahl 0.0-1.0>,\n` +
+    `    "horizonWeeks": <ganze Zahl 1-52 - erwarteter Wirkungshorizont des Ereignisses>,\n` +
+    `    "summary": "<1 sachlicher Satz NUR basierend auf Titel/Quelle/Datum, auf Deutsch>",\n` +
+    `    "impactExplanation": "<1 Satz qualitative Erklärung der möglichen Marktrelevanz - OHNE Preiswert, OHNE Prozentangabe, OHNE Kursziel, OHNE Zeitreihe>"\n` +
+    `  }, ... }\n` +
     `}\n` +
     `Für "scenarios" MÜSSEN alle Szenario-ids als Schlüssel vorkommen. Für "news" MÜSSEN alle Indizes ` +
-    `0 bis ${Math.max(realNews.length - 1, 0)} vorkommen, sofern Artikel vorhanden sind. Keine Übertreibungen, keine Anlageberatung.`
+    `0 bis ${Math.max(realNews.length - 1, 0)} vorkommen, sofern Artikel vorhanden sind. Keine Übertreibungen, ` +
+    `keine Anlageberatung. Wiederhole: NIE einen Preis, ein Kursziel, eine Preisänderung in Prozent oder eine ` +
+    `Zeitreihe nennen - weder in "scenarios" noch in "news".`
   );
 }
 
@@ -230,21 +341,165 @@ app.get("/api/status", (req, res) => {
   res.json({ ok: true, aiConfigured: AI_CONFIGURED, model: AI_CONFIGURED ? BMF_MODEL : null });
 });
 
+// ---- Validierung der News-Klassifizierung ------------------------------------------------
+// Das LLM liefert AUSSCHLIESSLICH semantische Klassifizierung (siehe buildPrompt) - niemals
+// Preise/Kursziele/Prozentänderungen/Zeitreihen. Alle Felder werden serverseitig zusätzlich
+// geklemmt/whitelisted, bevor sie das Backend verlassen; bei einer strukturell ungültigen
+// Antwort (kein Objekt) wird komplett auf eine neutrale Klassifizierung zurückgefallen.
+const NEWS_CATEGORIES = ["supply", "demand", "regulation", "geopolitics", "technology", "macro", "other"];
+const NEWS_DIRECTIONS = ["bullish", "bearish", "neutral"];
+const NEWS_CATEGORY_LABELS_DE = {
+  supply: "Angebot",
+  demand: "Nachfrage",
+  regulation: "Regulierung",
+  geopolitics: "Geopolitik",
+  technology: "Technologie",
+  macro: "Makro",
+  other: "Sonstiges",
+};
+// Rein deterministische, nicht vom LLM erzeugte Zuordnung Kategorie -> im Chart hervorzuhebende
+// Szenarien (nur für die bestehende Klick-Hervorhebung in der UI, keine Preisrelevanz).
+function scenariosForClassification(category, direction) {
+  if (category === "supply" || category === "geopolitics") return ["supplyShock"];
+  if (category === "regulation") return ["euRegulation"];
+  if (category === "technology") return ["demandSurge"];
+  if (category === "demand") {
+    if (direction === "bullish") return ["demandSurge"];
+    if (direction === "bearish") return ["demandSlowdown"];
+  }
+  return [];
+}
+
+function clamp01(value, fallback) {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : fallback;
+}
+
+function clampHorizonWeeks(value, fallback) {
+  const n = Math.round(Number(value));
+  return Number.isFinite(n) ? Math.min(52, Math.max(1, n)) : fallback;
+}
+
+function neutralNewsClassification(title) {
+  return {
+    category: "other",
+    direction: "neutral",
+    severity: 0,
+    confidence: 0,
+    chinaRelevance: 0.5,
+    euRelevance: 0.5,
+    horizonWeeks: 12,
+    summary: title,
+    impactExplanation: "Automatisch abgerufen, noch keine KI-Einschätzung verfügbar.",
+  };
+}
+
+function validateNewsClassification(raw, title) {
+  if (!raw || typeof raw !== "object") return neutralNewsClassification(title);
+  return {
+    category: NEWS_CATEGORIES.includes(raw.category) ? raw.category : "other",
+    direction: NEWS_DIRECTIONS.includes(raw.direction) ? raw.direction : "neutral",
+    severity: clamp01(raw.severity, 0),
+    confidence: clamp01(raw.confidence, 0),
+    chinaRelevance: clamp01(raw.chinaRelevance, 0.5),
+    euRelevance: clamp01(raw.euRelevance, 0.5),
+    horizonWeeks: clampHorizonWeeks(raw.horizonWeeks, 12),
+    summary: typeof raw.summary === "string" && raw.summary.trim() ? raw.summary.trim() : title,
+    impactExplanation: typeof raw.impactExplanation === "string" && raw.impactExplanation.trim()
+      ? raw.impactExplanation.trim()
+      : "",
+  };
+}
+
 // Neutrale Standard-Klassifizierung für echte News, falls keine KI verfügbar ist/fehlschlägt.
 function applyFallbackClassification(newsItems) {
   newsItems.forEach((n) => {
-    n.category = n.category || "Nachrichten (unklassifiziert)";
+    n.category = n.category || NEWS_CATEGORY_LABELS_DE.other;
+    n.categoryKey = n.categoryKey || "other";
     n.sentiment = n.sentiment || "neutral";
     n.summary = n.summary || n.title;
     n.impact = n.impact || "Automatisch abgerufen, noch keine KI-Einschätzung verfügbar.";
     n.scenarios = n.scenarios || [];
+    n.severity = n.severity ?? 0;
+    n.confidence = n.confidence ?? 0;
+    n.chinaRelevance = n.chinaRelevance ?? 0.5;
+    n.euRelevance = n.euRelevance ?? 0.5;
+    n.horizonWeeks = n.horizonWeeks ?? 12;
   });
   return newsItems;
 }
 
+// ---- Textbaustein für "Aktuelle Marktlage" (currentMarket) --------------------------------
+// Rein deterministisch aus bereits validierten/geklemmten Feldern generiert (Kategorie/
+// Richtung/Konfidenz je News, marketState-Scores) - KEIN zusätzlicher LLM-Aufruf, KEIN
+// erfundener Preiswert. Erklärt Richtung/Treiber/Konfidenz sowie, dass die Größenordnung
+// historisch kalibriert (Quantil) statt von der KI numerisch vorgegeben ist.
+function directionLabelDe(direction) {
+  if (direction === "bullish") return "preistreibend";
+  if (direction === "bearish") return "preisdämpfend";
+  return "neutral";
+}
+
+function buildCurrentMarketSummary({ newsSource, aiEnabled, news, marketState }) {
+  if (newsSource !== "live" || !aiEnabled) {
+    return (
+      "Aktuell keine live abgerufenen bzw. KI-klassifizierten News verfügbar - \"Aktuelle " +
+      "Marktlage\" entspricht daher unverändert der Basisprognose. Es wird kein Marktsignal erfunden."
+    );
+  }
+
+  const relevantNews = news.filter((n) => (n.severity ?? 0) > 0 && (n.confidence ?? 0) > 0);
+  const topDrivers = [...relevantNews]
+    .sort((a, b) => (b.severity ?? 0) * (b.confidence ?? 0) - (a.severity ?? 0) * (a.confidence ?? 0))
+    .slice(0, 3);
+  const driverText = topDrivers.length
+    ? topDrivers.map((n) => `"${n.title}" (${n.category}, ${directionLabelDe(n.sentiment)})`).join("; ")
+    : "keine klar dominierenden Einzelmeldungen";
+
+  const avgConfidence = relevantNews.length
+    ? relevantNews.reduce((sum, n) => sum + (n.confidence ?? 0), 0) / relevantNews.length
+    : 0;
+
+  const chinaOverall = marketState.china.overall;
+  const euOverall = marketState.eu.overall;
+  const chinaDir = chinaOverall > 0.02 ? "bullish" : chinaOverall < -0.02 ? "bearish" : "neutral";
+  const euDir = euOverall > 0.02 ? "bullish" : euOverall < -0.02 ? "bearish" : "neutral";
+
+  return (
+    `Basierend auf aktuell klassifizierten News: China ${directionLabelDe(chinaDir)} ` +
+    `(Marktdruck ${Math.abs(chinaOverall).toFixed(2)}), EU ${directionLabelDe(euDir)} ` +
+    `(Marktdruck ${Math.abs(euOverall).toFixed(2)}). Wichtigste Treiber: ${driverText}. ` +
+    `Durchschnittliche KI-Konfidenz der zugrunde liegenden Klassifizierung: ${Math.round(avgConfidence * 100)}%. ` +
+    `Die Größenordnung der Preisabweichung ist historisch kalibriert (Quantil der realen ` +
+    `Forward-Return-Verteilung) und wurde NICHT direkt von der KI als Preisprognose vorgegeben; ` +
+    `ohne aktuelle/relevante News konvergiert dieses Szenario automatisch zur Basisprognose zurück (Freshness-Decay).`
+  );
+}
+
 app.post("/api/refresh", async (req, res) => {
   try {
-    const scenarios = CarbideData.computeScenarioSeries();
+    // Echte Historie + per Backtest gewähltes Modell/p50-Prognose aus forecasting/pipeline.py
+    // (Excel-Daten) statt der illustrativen Konstanten aus public/js/data.js.
+    let pipelineResult;
+    try {
+      pipelineResult = await runForecastingPipeline();
+    } catch (err) {
+      console.error("[Forecasting] Pipeline-Aufruf fehlgeschlagen:", err.message);
+      return res.status(502).json({
+        ok: false,
+        error: `Prognose-Pipeline nicht verfügbar: ${err.message}`,
+      });
+    }
+
+    // "base"-Szenario = exakt die p50-Modellprognose (deltaFn liefert 0). Die übrigen
+    // Szenarien wenden ihre bestehenden Sensitivitäten weiterhin auf diese ECHTE Basis an,
+    // statt auf die frühere künstliche baseTrend()-Fortschreibung.
+    const scenarios = CarbideData.computeScenarioSeries(
+      pipelineResult.china.p50,
+      pipelineResult.eu.p50,
+      pipelineResult.china.last_observed.price,
+      pipelineResult.eu.last_observed.price
+    );
 
     // Echte, aktuelle News per Google-News-RSS abrufen (kein API-Key nötig). Es gibt bewusst
     // KEINEN fiktiven Fallback mehr - schlägt der Abruf fehl, bleibt die Liste leer und das
@@ -280,15 +535,24 @@ app.post("/api/refresh", async (req, res) => {
         if (newsSource === "live") {
           const newsClassification = aiResult?.news || {};
           news.forEach((n, i) => {
-            const c = newsClassification[String(i)];
-            if (c) {
-              n.category = c.category || "Sonstiges";
-              n.sentiment = c.sentiment || "neutral";
-              n.summary = c.summary || n.title;
-              n.impact = c.impact || "";
-              n.scenarios = Array.isArray(c.scenarios) ? c.scenarios : [];
-              n.aiGenerated = true;
-            }
+            // Serverseitig validiert/geklemmt (Kategorie/Richtung whitelisted, Werte auf 0..1
+            // bzw. 1..52 geklemmt) - fällt bei strukturell ungültiger LLM-Antwort komplett auf
+            // eine neutrale Klassifizierung zurück. Die zusätzlichen Felder (severity/confidence/
+            // chinaRelevance/euRelevance/horizonWeeks) werden aktuell NICHT zur Veränderung der
+            // numerischen Szenarien verwendet.
+            const validated = validateNewsClassification(newsClassification[String(i)], n.title);
+            n.category = NEWS_CATEGORY_LABELS_DE[validated.category];
+            n.categoryKey = validated.category; // roher Enum-Wert für lib/newsSignals.js, getrennt vom Anzeige-Label
+            n.sentiment = validated.direction;
+            n.summary = validated.summary;
+            n.impact = validated.impactExplanation;
+            n.scenarios = scenariosForClassification(validated.category, validated.direction);
+            n.severity = validated.severity;
+            n.confidence = validated.confidence;
+            n.chinaRelevance = validated.chinaRelevance;
+            n.euRelevance = validated.euRelevance;
+            n.horizonWeeks = validated.horizonWeeks;
+            n.aiGenerated = true;
           });
         }
         aiEnabled = true;
@@ -300,6 +564,45 @@ app.post("/api/refresh", async (req, res) => {
 
     if (newsSource === "live") applyFallbackClassification(news);
 
+    // Reine Signal-Aggregation (lib/newsSignals.js) aus den bereits klassifizierten News -
+    // fließt aktuell NICHT in die numerische Prognose ein, siehe dortige Dokumentation.
+    const marketState = aggregateMarketState(
+      newsSource === "live"
+        ? news.map((n) => ({
+            date: n.date,
+            category: n.categoryKey,
+            direction: n.sentiment,
+            severity: n.severity,
+            confidence: n.confidence,
+            chinaRelevance: n.chinaRelevance,
+            euRelevance: n.euRelevance,
+          }))
+        : []
+    );
+
+    // Dynamisches, newsgesteuertes Szenario "Aktuelle Marktlage" (currentMarket): bildet
+    // ausschließlich Vorzeichen (Richtung) und Betrag (Marktdruck) von marketState.<region>.overall
+    // auf ein Quantil der ECHTEN historischen Forward-Return-Verteilung ab (forecasting/scenarios.py,
+    // build_news_adjusted_scenario) - die KI liefert an keiner Stelle einen Preiswert. Nur verfügbar,
+    // wenn sowohl live News als auch eine KI-Klassifizierung vorliegen; sonst explizit als nicht
+    // verfügbar markiert (entspricht dann zusätzlich exakt der Basisprognose, siehe dortige Doku).
+    const currentMarketAvailable = newsSource === "live" && aiEnabled;
+    let currentMarketScenario;
+    try {
+      currentMarketScenario = await runCurrentMarketScenario(
+        marketState.china.overall,
+        marketState.eu.overall,
+        currentMarketAvailable
+      );
+      currentMarketScenario.summary = buildCurrentMarketSummary({
+        newsSource, aiEnabled, news, marketState,
+      });
+    } catch (err) {
+      console.error("[Aktuelle Marktlage] Berechnung fehlgeschlagen:", err.message);
+      currentMarketScenario = null;
+    }
+    if (currentMarketScenario) scenarios.push(currentMarketScenario);
+
     res.json({
       ok: true,
       generatedAt: new Date().toISOString(),
@@ -307,13 +610,21 @@ app.post("/api/refresh", async (req, res) => {
       aiError,
       newsSource,
       history: {
-        labels: CarbideData.HISTORY_LABELS,
-        china: CarbideData.CHINA_HISTORY,
-        eu: CarbideData.EU_HISTORY,
+        labels: pipelineResult.history.labels.map(formatMonthLabel),
+        china: pipelineResult.history.china,
+        eu: pipelineResult.history.eu,
       },
-      forecastLabels: CarbideData.FORECAST_LABELS,
+      forecastLabels: pipelineResult.forecastLabels.map(formatMonthLabel),
+      // Zusätzlich zum bisherigen p50-Basisszenario in "scenarios": rohe p10/p50/p90-Baseline-
+      // Bandbreite je Region, für die Unsicherheits-Visualisierung im Chart. Rein additiv - bricht
+      // keinen bestehenden Vertrag (scenarios/history/forecastLabels bleiben unverändert).
+      baseline: {
+        china: { p10: pipelineResult.china.p10, p50: pipelineResult.china.p50, p90: pipelineResult.china.p90 },
+        eu: { p10: pipelineResult.eu.p10, p50: pipelineResult.eu.p50, p90: pipelineResult.eu.p90 },
+      },
       scenarios,
       news,
+      marketState,
     });
   } catch (err) {
     console.error("[/api/refresh] Fehler:", err);

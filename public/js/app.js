@@ -21,6 +21,11 @@
     refreshBtn: document.getElementById("refreshBtn"),
     aiStatusPill: document.getElementById("aiStatusPill"),
     toast: document.getElementById("toast"),
+    currentMarketCard: document.getElementById("currentMarketCard"),
+    currentMarketToggle: document.getElementById("currentMarketToggle"),
+    currentMarketDot: document.getElementById("currentMarketDot"),
+    currentMarketChanges: document.getElementById("currentMarketChanges"),
+    currentMarketSummary: document.getElementById("currentMarketSummary"),
   };
 
   // Von D abgeleitete Werte werden nach jedem Refresh neu berechnet (siehe recomputeDerived).
@@ -71,30 +76,42 @@
   }
 
   // ---- Chart-Konfiguration bauen -----------------------------------
+  // Raw EU (USD/mtu WO3) und China (CNY/kg APT) Preise sind unterschiedliche Einheiten und
+  // dürfen bei "Beide" nicht direkt auf derselben Y-Achse verglichen werden. Für diesen Fall
+  // wird jede Serie rein zur Anzeige auf einen Index (letzter Historienwert = 100) umgerechnet;
+  // die Rohdaten in D bleiben unverändert.
+  function toIndex(data, lastValue) {
+    if (!lastValue) return data.map(() => null);
+    return data.map((v) => (v === null || v === undefined ? null : (v / lastValue) * 100));
+  }
+
   function buildSeries() {
     const series = [];
     const showChina = state.region === "china" || state.region === "both";
     const showEu = state.region === "eu" || state.region === "both";
+    const indexMode = state.region === "both";
     const hasHighlight = !!(state.highlightScenarios && state.highlightScenarios.length);
 
     if (showChina) {
+      const raw = [...D.CHINA_HISTORY, ...Array(D.FORECAST_LABELS.length).fill(null)];
       series.push({
         id: "actual-china",
         label: "Historie China",
         color: "#101c33",
         dashed: false,
         emphasize: true,
-        data: [...D.CHINA_HISTORY, ...Array(D.FORECAST_LABELS.length).fill(null)],
+        data: indexMode ? toIndex(raw, D.LAST_CHINA) : raw,
       });
     }
     if (showEu) {
+      const raw = [...D.EU_HISTORY, ...Array(D.FORECAST_LABELS.length).fill(null)];
       series.push({
         id: "actual-eu",
         label: "Historie EU",
         color: "#3a4a63",
         dashed: false,
         emphasize: true,
-        data: [...D.EU_HISTORY, ...Array(D.FORECAST_LABELS.length).fill(null)],
+        data: indexMode ? toIndex(raw, D.LAST_EU) : raw,
       });
     }
 
@@ -106,6 +123,7 @@
       if (showChina) {
         const data = Array(HIST_COUNT).fill(null);
         data[HIST_COUNT - 1] = D.LAST_CHINA;
+        const raw = [...data, ...sc.china];
         series.push({
           id: `${sc.id}-china`,
           label: `${sc.shortName} (CN)`,
@@ -113,12 +131,13 @@
           dashed: true,
           faded,
           emphasize: isHL,
-          data: [...data, ...sc.china],
+          data: indexMode ? toIndex(raw, D.LAST_CHINA) : raw,
         });
       }
       if (showEu) {
         const data = Array(HIST_COUNT).fill(null);
         data[HIST_COUNT - 1] = D.LAST_EU;
+        const raw = [...data, ...sc.eu];
         series.push({
           id: `${sc.id}-eu`,
           label: `${sc.shortName} (EU)`,
@@ -126,7 +145,7 @@
           dashed: true,
           faded,
           emphasize: isHL,
-          data: [...data, ...sc.eu],
+          data: indexMode ? toIndex(raw, D.LAST_EU) : raw,
         });
       }
     });
@@ -134,13 +153,52 @@
     return series;
   }
 
+  // Baseline-Unsicherheitsband (P10/P90) je aktiver Region, um die Modellprognose (P50) - dieselbe
+  // Anker-/Index-Logik wie buildSeries() (letzter realer Wert als Übergangspunkt, Index-Skalierung
+  // im "Beide"-Modus), damit Band und Basis-Linie exakt zusammenpassen.
+  function buildBaselineBands() {
+    if (!D.BASELINE) return [];
+    const indexMode = state.region === "both";
+    const showChina = state.region === "china" || state.region === "both";
+    const showEu = state.region === "eu" || state.region === "both";
+
+    function anchor(forecastValues, lastValue) {
+      const data = Array(HIST_COUNT - 1).fill(null);
+      return [...data, lastValue, ...forecastValues];
+    }
+
+    function makeBand(region, baseline, lastValue, color) {
+      const p10 = anchor(baseline.p10, lastValue);
+      const p50 = anchor(baseline.p50, lastValue);
+      const p90 = anchor(baseline.p90, lastValue);
+      return {
+        id: `baseline-${region}`,
+        regionLabel: region === "china" ? "CN" : "EU",
+        color,
+        p10: indexMode ? toIndex(p10, lastValue) : p10,
+        p50: indexMode ? toIndex(p50, lastValue) : p50,
+        p90: indexMode ? toIndex(p90, lastValue) : p90,
+      };
+    }
+
+    const bands = [];
+    if (showChina && D.BASELINE.china) bands.push(makeBand("china", D.BASELINE.china, D.LAST_CHINA, "#101c33"));
+    if (showEu && D.BASELINE.eu) bands.push(makeBand("eu", D.BASELINE.eu, D.LAST_EU, "#3a4a63"));
+    return bands;
+  }
+
   function renderChart() {
     const series = buildSeries();
+    const bands = buildBaselineBands();
+    const unit = state.region === "eu" ? "USD/mtu WO3"
+      : state.region === "china" ? "CNY/kg APT"
+      : "Index (Today = 100)";
     window.renderPriceChart(els.chartSvg, els.chartTooltip, {
       labels: ALL_LABELS,
       historyCount: HIST_COUNT,
       series,
-      unit: "USD/kg",
+      bands,
+      unit,
     });
     renderLegend(series);
   }
@@ -156,8 +214,15 @@
   }
 
   // ---- Szenario-Chips -----------------------------------------------
+  // "Aktuelle Marktlage" (currentMarket) erscheint bewusst NICHT in dieser Liste - sie hat eine
+  // eigene, separate Karte (renderCurrentMarketCard), da sie kein festes Stress-Szenario ist,
+  // sondern live aus News abgeleitet und bei jedem Refresh neu berechnet wird.
+  function stressScenarios() {
+    return D.SCENARIOS.filter((sc) => sc.id !== "currentMarket");
+  }
+
   function renderScenarioToggles() {
-    els.scenarioToggles.innerHTML = D.SCENARIOS.map((sc) => {
+    els.scenarioToggles.innerHTML = stressScenarios().map((sc) => {
       const checked = state.activeScenarios.has(sc.id) ? "checked" : "";
       const disabled = sc.alwaysOn ? "disabled" : "";
       const hl = state.highlightScenarios && state.highlightScenarios.includes(sc.id) ? "highlighted" : "";
@@ -189,7 +254,7 @@
   }
 
   function renderInsights() {
-    const active = D.SCENARIOS.filter((sc) => state.activeScenarios.has(sc.id));
+    const active = stressScenarios().filter((sc) => state.activeScenarios.has(sc.id));
     els.insightsList.innerHTML = active.map((sc) => `
       <div class="insight-item">
         <div class="insight-head">
@@ -202,6 +267,40 @@
         <p class="insight-text">${sc.summary}</p>
       </div>
     `).join("");
+  }
+
+  // ---- Aktuelle Marktlage (news-adjustiertes Szenario, separate Karte) --------------------
+  function renderCurrentMarketCard() {
+    const sc = D.SCENARIOS.find((s) => s.id === "currentMarket");
+    if (!sc) {
+      els.currentMarketCard.hidden = true;
+      return;
+    }
+    els.currentMarketCard.hidden = false;
+
+    const available = !!(sc.metadata && sc.metadata.available);
+    els.currentMarketDot.style.background = sc.color;
+    els.currentMarketChanges.innerHTML = `
+      <span title="China, 12 Monate">CN: ${changeSpan(sc.expectedChange12m.china)}</span>
+      <span title="EU, 12 Monate">EU: ${changeSpan(sc.expectedChange12m.eu)}</span>
+      <span class="badge badge-${available ? sentimentClass(sc.sentiment) : "neutral"}">
+        ${available ? sentimentLabel(sc.sentiment) : "Kein aktuelles Signal"}
+      </span>
+    `;
+    els.currentMarketSummary.textContent = sc.summary || "";
+
+    // Standardmäßig im Chart sichtbar, sobald sie erstmalig erscheint (z.B. nach dem ersten Refresh).
+    if (!state.activeScenarios.has("currentMarket")) state.activeScenarios.add("currentMarket");
+    els.currentMarketToggle.checked = state.activeScenarios.has("currentMarket");
+
+    if (!els.currentMarketToggle.dataset.wired) {
+      els.currentMarketToggle.dataset.wired = "1";
+      els.currentMarketToggle.addEventListener("change", (e) => {
+        if (e.target.checked) state.activeScenarios.add("currentMarket");
+        else state.activeScenarios.delete("currentMarket");
+        renderChart();
+      });
+    }
   }
 
   // ---- News / Voices of the Market ----------------------------------
@@ -315,12 +414,14 @@
         LAST_EU: json.history.eu[json.history.eu.length - 1],
         SCENARIOS: json.scenarios,
         NEWS: json.news,
+        BASELINE: json.baseline || null,
       };
       recomputeDerived();
       setAiPill(json.aiEnabled);
       els.lastUpdate.textContent = fmtDateTime(json.generatedAt ? new Date(json.generatedAt) : new Date());
 
       renderScenarioToggles();
+      renderCurrentMarketCard();
       renderChart();
       renderInsights();
       renderNews();

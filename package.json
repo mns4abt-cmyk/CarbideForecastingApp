@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
+    "test": "node --test",
     "package:win": "pkg server.js --config package.json --targets node22-win-x64 --output dist/CarbideMarktradar.exe"
   },
   "engines": {

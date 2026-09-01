@@ -48,6 +48,20 @@
         </div>
 
         <div class="legend" id="chartLegend"></div>
+        <p class="chart-note">Forecast intervals reflect model uncertainty. Scenarios are historically calibrated stress / what-if paths.</p>
+      </div>
+
+      <div class="card current-market-card" id="currentMarketCard" hidden>
+        <div class="card-header">
+          <h2>Aktuelle Marktlage <span class="badge badge-category">News-adjustiert</span></h2>
+          <label class="scenario-chip" id="currentMarketToggleWrap">
+            <input type="checkbox" id="currentMarketToggle" />
+            <span class="dot" id="currentMarketDot"></span>
+            Im Chart anzeigen
+          </label>
+        </div>
+        <div class="insight-changes" id="currentMarketChanges"></div>
+        <p class="insight-text" id="currentMarketSummary"></p>
       </div>
 
       <div class="card insights-card">

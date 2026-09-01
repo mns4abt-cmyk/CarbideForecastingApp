@@ -145,11 +145,22 @@ body {
 .chart-tooltip .tt-date { font-weight: 700; margin-bottom: 2px; }
 .chart-tooltip .tt-row { display: flex; align-items: center; gap: 6px; }
 .chart-tooltip .tt-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.chart-tooltip .tt-baseline { margin: 4px 0; padding: 4px 0; border-top: 1px solid rgba(255,255,255,0.18); border-bottom: 1px solid rgba(255,255,255,0.18); }
+.chart-tooltip .tt-baseline-title { font-weight: 700; opacity: 0.85; margin-bottom: 1px; }
+
+.chart-note { margin: 8px 0 0; font-size: 0.76rem; color: var(--text-muted); font-style: italic; }
 
 .legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 10px; font-size: 0.78rem; color: var(--text-muted); }
 .legend-item { display: flex; align-items: center; gap: 6px; }
 .legend-swatch { width: 14px; height: 3px; border-radius: 2px; }
 .legend-swatch.dashed { background-image: linear-gradient(90deg, currentColor 50%, transparent 50%); background-size: 8px 3px; height: 0; border-top: 3px dashed currentColor; }
+
+/* ---------- Aktuelle Marktlage (news-adjustiertes Szenario, separat von den Stress-Szenarien) ---------- */
+.current-market-card { border-color: #cfe8de; }
+.current-market-card .insight-changes { margin: 12px 0 4px; font-size: 0.85rem; font-weight: 700; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.current-market-card .insight-text { margin-top: 8px; }
+#currentMarketToggleWrap { background: #fff; }
+#currentMarketDot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
 
 /* ---------- Insights ---------- */
 .insights-sub { margin: 0 0 12px; font-size: 0.82rem; color: var(--text-muted); }
