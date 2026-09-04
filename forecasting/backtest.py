@@ -56,7 +56,7 @@ def _naive_scale_lookup(series: pd.DataFrame) -> pd.Series:
     return s.diff().abs().expanding(min_periods=2).mean()
 
 
-def run_cross_validation(series: pd.DataFrame, unique_id: str, models: list | None = None) -> pd.DataFrame:
+def run_cross_validation(series: pd.DataFrame, unique_id: str, models: list | None = None, transformation: str = "raw") -> pd.DataFrame:
     """Führt eine Walk-Forward-Kreuzvalidierung über `MAX_HORIZON` Wochen durch.
 
     Args:
@@ -71,7 +71,12 @@ def run_cross_validation(series: pd.DataFrame, unique_id: str, models: list | No
     Raises:
         ValueError: Wenn die Historie zu kurz für die konfigurierten Fenster ist.
     """
-    sf_df = to_statsforecast_frame(series, unique_id, date_col="week", value_col="price")
+    transformed = series.copy()
+    if transformation == "log":
+        transformed["price"] = np.log(transformed["price"])
+    elif transformation != "raw":
+        raise ValueError(f"Unbekannte Transformation: {transformation}")
+    sf_df = to_statsforecast_frame(transformed, unique_id, date_col="week", value_col="price")
     used_models = models or default_models(season_length=DEFAULT_SEASON_LENGTH)
 
     min_required = MAX_HORIZON + (N_WINDOWS - 1) * STEP_SIZE + 10
@@ -84,11 +89,15 @@ def run_cross_validation(series: pd.DataFrame, unique_id: str, models: list | No
     logger.info(
         "Starte Walk-Forward-Backtest für '%s': %d Wochen Historie, h=%d, n_windows=%d, step_size=%d, Modelle=%s",
         unique_id, len(sf_df), MAX_HORIZON, N_WINDOWS, STEP_SIZE,
-        [m.__class__.__name__ for m in used_models],
+        [m.alias for m in used_models],
     )
 
     sf = StatsForecast(models=used_models, freq=FREQ, n_jobs=1)
     cv_df = sf.cross_validation(df=sf_df, h=MAX_HORIZON, n_windows=N_WINDOWS, step_size=STEP_SIZE)
+    if transformation == "log":
+        cv_df["y"] = np.exp(cv_df["y"])
+        for model in used_models:
+            cv_df[model.alias] = np.exp(cv_df[model.alias])
 
     logger.info(
         "Backtest für '%s' abgeschlossen: %d Zeilen über %d Testfenster",
@@ -142,7 +151,8 @@ def compute_metrics(
             continue
         y_pred = subset[name].to_numpy()
 
-        mae = float(np.mean(np.abs(y_true - y_pred)))
+        absolute_errors = np.abs(y_true - y_pred)
+        mae = float(np.mean(absolute_errors))
         smape = _smape(y_true, y_pred)
 
         scale = subset["scale"].replace(0, np.nan).to_numpy()
@@ -150,12 +160,18 @@ def compute_metrics(
             mase_values = np.abs(y_true - y_pred) / scale
         mase = float(np.nanmean(mase_values)) if np.any(~np.isnan(mase_values)) else None
 
-        metrics[name] = {"mae": mae, "smape": smape, "mase": mase, "n_obs": int(len(subset))}
+        metrics[name] = {
+            "mae": mae,
+            "smape": smape,
+            "mase": mase,
+            "n_obs": int(len(subset)),
+            "mae_std": float(np.std(absolute_errors, ddof=0)),
+        }
 
     return metrics
 
 
-def select_model(metrics_by_horizon: dict[int, dict[str, dict]]) -> tuple[str, dict]:
+def select_model(metrics_by_horizon: dict[int, dict[str, dict]], benchmark: str = "Naive__raw") -> tuple[str, dict]:
     """Wählt ein Modell je Markt anhand konsistenter Überlegenheit ggü. Naive.
 
     Ein anspruchsvolleres Modell wird nur dann Kandidat, wenn seine MASE bei
@@ -172,11 +188,11 @@ def select_model(metrics_by_horizon: dict[int, dict[str, dict]]) -> tuple[str, d
     """
     horizons = sorted(metrics_by_horizon.keys())
     model_names = {name for h_metrics in metrics_by_horizon.values() for name in h_metrics}
-    challengers = sorted(model_names - {"Naive"})
+    challengers = sorted(model_names - {benchmark})
 
     wins = {name: 0 for name in challengers}
     for h in horizons:
-        naive_mase = metrics_by_horizon[h].get("Naive", {}).get("mase")
+        naive_mase = metrics_by_horizon[h].get(benchmark, {}).get("mase")
         if naive_mase is None:
             continue
         for name in challengers:
@@ -192,7 +208,7 @@ def select_model(metrics_by_horizon: dict[int, dict[str, dict]]) -> tuple[str, d
         values = [v for v in values if v is not None]
         return sum(values) / len(values) if values else float("inf")
 
-    selected = min(candidates, key=_overall_mase) if candidates else "Naive"
+    selected = min(candidates, key=_overall_mase) if candidates else benchmark
 
     logger.info(
         "Modellauswahl: Siege ggü. Naive je Modell=%s, Mehrheitsschwelle=%d, gewählt='%s'",
@@ -217,17 +233,28 @@ def run_market_backtest(market: str, weekly_df: pd.DataFrame) -> dict:
     """
     value_col = MARKET_COLUMNS[market]
     series = _prepare_market_series(weekly_df, value_col)
-    models = default_models(season_length=DEFAULT_SEASON_LENGTH)
-    model_names = [m.__class__.__name__ for m in models]
-
-    cv_df = run_cross_validation(series, unique_id=market, models=models)
     scale_lookup = _naive_scale_lookup(series)
-
-    metrics_by_horizon = {h: compute_metrics(cv_df, scale_lookup, h, model_names) for h in HORIZONS}
-    selected_model, summary_metrics = select_model(metrics_by_horizon)
+    metrics_by_horizon = {h: {} for h in HORIZONS}
+    for transformation in ("raw", "log"):
+        models = default_models(season_length=DEFAULT_SEASON_LENGTH)
+        # log-Naive is identical to raw Naive after inversion; retain one mandatory benchmark.
+        if transformation == "log":
+            models = [model for model in models if model.alias != "Naive"]
+        names = [model.alias for model in models]
+        cv_df = run_cross_validation(series, unique_id=market, models=models, transformation=transformation)
+        for horizon in HORIZONS:
+            metrics_by_horizon[horizon].update({
+                f"{name}__{transformation}": values
+                for name, values in compute_metrics(cv_df, scale_lookup, horizon, names).items()
+            })
+    selected_key, summary_metrics = select_model(metrics_by_horizon)
+    selected_model, transformation = selected_key.split("__", 1)
 
     return {
         "selected_model": selected_model,
+        "transformation": transformation,
+        "selected_key": selected_key,
+        "benchmark_key": "Naive__raw",
         "metrics": summary_metrics,
         "all_metrics": metrics_by_horizon,
     }

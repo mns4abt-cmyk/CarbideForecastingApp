@@ -26,9 +26,10 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pandas as pd
+import numpy as np
 from statsforecast import StatsForecast
 
-from forecasting.backtest import MARKET_COLUMNS, run_all_backtests
+from forecasting.backtest import MARKET_COLUMNS, MAX_HORIZON, run_all_backtests, run_cross_validation
 from forecasting.load_data import load_weekly_market_data
 from forecasting.models import DEFAULT_SEASON_LENGTH, default_models, to_statsforecast_frame
 
@@ -50,27 +51,91 @@ def _prepare_market_series(weekly_df: pd.DataFrame, value_col: str) -> pd.DataFr
 def _select_model_instance(model_name: str):
     """Holt die konkrete Modellinstanz zu einem per Backtest ausgewählten Modellnamen."""
     for model in default_models(season_length=DEFAULT_SEASON_LENGTH):
-        if model.__class__.__name__ == model_name:
+        if model.alias == model_name:
             return model
     raise ValueError(f"Modell '{model_name}' ist nicht in default_models() enthalten.")
 
 
-def _forecast_weekly(series: pd.DataFrame, unique_id: str, model_name: str) -> pd.DataFrame:
-    """Fittet das ausgewählte Modell auf der Gesamthistorie, prognostiziert 52 Wochen inkl. 80%-Intervall."""
-    sf_df = to_statsforecast_frame(series, unique_id, date_col="week", value_col="price")
+def _forecast_weekly(series: pd.DataFrame, unique_id: str, model_name: str, transformation: str) -> pd.DataFrame:
+    """Punktprognose plus positive, multiplikative OOS-Fehlerintervalle."""
+    transformed = series.copy()
+    if transformation == "log":
+        transformed["price"] = np.log(transformed["price"])
+    sf_df = to_statsforecast_frame(transformed, unique_id, date_col="week", value_col="price")
     model = _select_model_instance(model_name)
 
     sf = StatsForecast(models=[model], freq=FREQ, n_jobs=1)
-    fc_df = sf.forecast(df=sf_df, h=FORECAST_HORIZON_WEEKS, level=[INTERVAL_LEVEL])
+    fc_df = sf.forecast(df=sf_df, h=FORECAST_HORIZON_WEEKS)
+    p50 = fc_df[model_name].to_numpy(dtype=float)
+    if transformation == "log":
+        p50 = np.exp(p50)
 
-    return fc_df.rename(
-        columns={
-            "ds": "week",
-            model_name: "p50",
-            f"{model_name}-lo-{INTERVAL_LEVEL}": "p10",
-            f"{model_name}-hi-{INTERVAL_LEVEL}": "p90",
+    cv = run_cross_validation(series, unique_id, models=[model], transformation=transformation)
+    cv["lead"] = ((cv["ds"] - cv["cutoff"]).dt.days // 7).clip(upper=MAX_HORIZON)
+    cv["error"] = np.log(cv["y"] / cv[model_name])
+    fallback = cv[cv["lead"] == MAX_HORIZON]["error"].to_numpy()
+    lo, hi = [], []
+    for lead, point in enumerate(p50, start=1):
+        errors = cv[cv["lead"] == min(lead, MAX_HORIZON)]["error"].to_numpy()
+        errors = errors if errors.size else fallback
+        errors = np.append(errors, 0.0)
+        # Include the no-error outcome as an admissible central forecast: the
+        # empirical tails may otherwise both have one sign in only six windows.
+        lo_error = min(0.0, float(np.quantile(errors, .10)))
+        hi_error = max(0.0, float(np.quantile(errors, .90)))
+        lo.append(point * np.exp(lo_error))
+        hi.append(point * np.exp(hi_error))
+    result = pd.DataFrame({"week": fc_df["ds"], "p10": lo, "p50": p50, "p90": hi})
+    if not ((result.p10 > 0).all() and (result.p50 > 0).all() and (result.p90 > 0).all()
+            and (result.p10 <= result.p50).all() and (result.p50 <= result.p90).all()):
+        raise ValueError("Ungültige Prognoseintervalle: positive und geordnete Quantile erforderlich.")
+    return result
+
+
+def _assess_reliability(backtest: dict, current_price: float, series: pd.DataFrame) -> dict:
+    """Horizon-specific, deterministic reliability based on OOS level-scale errors.
+
+    Labels use sMAPE, MAE/current price, Naive improvement, error dispersion and
+    window count. MASE remains a model-selection diagnostic only: step-like price
+    series can have an artificially small one-week naive scale.
+    """
+    changes = series["price"].diff().abs().dropna()
+    zero_share = float((changes == 0).mean()) if len(changes) else 0.0
+    median_change = float(changes.median()) if len(changes) else 0.0
+    scale_note = (
+        "Historical weekly-change scale is unusually small/zero-heavy; MASE is diagnostic only."
+        if zero_share >= 0.25 or median_change == 0 else None
+    )
+    result = {}
+    for horizon, selected in backtest["metrics"].items():
+        naive = backtest["all_metrics"][int(horizon)][backtest["benchmark_key"]]
+        mae_current_pct = selected["mae"] / current_price * 100
+        improvement = (naive["mae"] - selected["mae"]) / naive["mae"] if naive["mae"] else 0.0
+        dispersion = selected["mae_std"] / selected["mae"] if selected["mae"] else 0.0
+        windows = selected["n_obs"]
+
+        if selected["smape"] > 25 or mae_current_pct > 30:
+            label = "VERY_LOW"
+        elif (selected["smape"] <= 12.5 and mae_current_pct <= 15 and improvement >= 0
+              and dispersion <= 0.75):
+            # HIGH additionally requires >=8 OOS windows; current six-window setup caps at MEDIUM.
+            label = "HIGH" if windows >= 8 and improvement >= 0.10 and dispersion <= 0.50 else "MEDIUM"
+        else:
+            label = "LOW"
+
+        result[f"{horizon}w"] = {
+            "label": label,
+            "smape": round(selected["smape"], 3),
+            "mae": round(selected["mae"], 3),
+            "maeCurrentPricePct": round(mae_current_pct, 3),
+            "maseDiagnostic": selected["mase"],
+            "naiveMae": round(naive["mae"], 3),
+            "maeImprovementVsNaive": round(improvement, 4),
+            "errorDispersionCv": round(dispersion, 4),
+            "backtestWindows": windows,
+            "scaleDiagnosticNote": scale_note,
         }
-    )[["week", "p10", "p50", "p90"]]
+    return result
 
 
 def _monthly_forecast_frame(weekly_forecast: pd.DataFrame, after_month: pd.Period, max_months: int) -> pd.DataFrame:
@@ -92,6 +157,49 @@ def _monthly_history_frame(series: pd.DataFrame, up_to_month: pd.Period, max_mon
     df["month"] = df["week"].dt.to_period("M")
     df = df[df["month"] <= up_to_month]
     return df.groupby("month", as_index=False).last().sort_values("month").tail(max_months).reset_index(drop=True)
+
+
+def build_frontend_scenarios(weekly_df: pd.DataFrame, baseline: dict, frontend_markets: dict) -> list[dict]:
+    """Erzeugt den Frontend-Szenariovertrag aus der statistischen Baseline.
+
+    Die P50-Baseline wird unverändert ausgegeben. Alle festen Stressszenarien
+    kommen aus ``forecasting.scenarios.build_scenarios`` und verwenden dieselbe
+    bereits geladene Historie sowie dieselbe bereits gefittete Baseline.
+    """
+    def _expected_change(values: list[float | None], last_observed: float) -> float:
+        final_value = next((value for value in reversed(values) if value is not None), None)
+        if final_value is None:
+            return 0.0
+        return round(((float(final_value) / last_observed) - 1.0) * 100.0, 1)
+
+    baseline_scenario = {
+        "id": "base",
+        "name": "Basisszenario",
+        "shortName": "Basis",
+        "color": "#6b7789",
+        "sentiment": "neutral",
+        "alwaysOn": True,
+        "summary": "P50 der statistischen, per Walk-Forward-Backtest ausgewählten Baseline-Prognose.",
+        "china": frontend_markets["china"]["p50"],
+        "eu": frontend_markets["eu"]["p50"],
+        "expectedChange12m": {
+            "china": _expected_change(frontend_markets["china"]["p50"], baseline["china"]["last_observed"]["price"]),
+            "eu": _expected_change(frontend_markets["eu"]["p50"], baseline["eu"]["last_observed"]["price"]),
+        },
+        "kind": "baseline",
+        "metadata": {
+            "method": "walk_forward_selected_statistical_model",
+            "selectedModel": {
+                "china": baseline["china"]["selected_model"],
+                "eu": baseline["eu"]["selected_model"],
+            },
+        },
+    }
+
+    # Lokaler Import verhindert einen Modulzyklus: scenarios importiert Hilfsfunktionen
+    # aus diesem Modul, wird aber erst ausgeführt, nachdem die Baseline bereitsteht.
+    from forecasting.scenarios import build_scenarios
+    return [baseline_scenario, *build_scenarios(weekly_df=weekly_df, baseline=baseline)]
 
 
 def build_baseline_forecast(weekly_df: pd.DataFrame | None = None) -> dict:
@@ -120,18 +228,22 @@ def build_baseline_forecast(weekly_df: pd.DataFrame | None = None) -> dict:
     result: dict = {}
     for market, series in series_by_market.items():
         selected_model = backtest_results[market]["selected_model"]
+        transformation = backtest_results[market]["transformation"]
 
         logger.info(
             "Baue Baseline-Prognose für '%s' mit Modell '%s' (h=%d Wochen, Intervall=%d%%)",
             market, selected_model, FORECAST_HORIZON_WEEKS, INTERVAL_LEVEL,
         )
 
-        weekly_forecast = _forecast_weekly(series, unique_id=market, model_name=selected_model)
+        weekly_forecast = _forecast_weekly(series, unique_id=market, model_name=selected_model, transformation=transformation)
         monthly_forecast = _monthly_forecast_frame(weekly_forecast, reference_month, FORECAST_MONTHS)
         last_row = series.iloc[-1]
 
         result[market] = {
             "selected_model": selected_model,
+            "transformation": transformation,
+            "reliability": _assess_reliability(backtest_results[market], float(last_row["price"]), series),
+            "backtest": backtest_results[market],
             "last_observed": {
                 "week": last_row["week"].strftime("%Y-%m-%d"),
                 "price": round(float(last_row["price"]), 2),
@@ -207,11 +319,16 @@ def build_frontend_payload() -> dict:
     for market in MARKET_COLUMNS:
         payload[market] = {
             "selected_model": baseline[market]["selected_model"],
+            "transformation": baseline[market]["transformation"],
+            "reliability": baseline[market]["reliability"],
+            "backtest": baseline[market]["backtest"],
             "last_observed": baseline[market]["last_observed"],
             "p10": _reindex_forecast(market, "p10", forecast_months),
             "p50": _reindex_forecast(market, "p50", forecast_months),
             "p90": _reindex_forecast(market, "p90", forecast_months),
         }
+
+    payload["scenarios"] = build_frontend_scenarios(weekly_df, baseline, payload)
     return payload
 
 

@@ -8,6 +8,8 @@
     "start": "node server.js",
     "dev": "node server.js",
     "test": "node --test",
+    "diagnose:news": "node scripts/diagnose-news.js",
+    "diagnose:ai": "node scripts/diagnose-ai.js",
     "package:win": "pkg server.js --config package.json --targets node22-win-x64 --output dist/CarbideMarktradar.exe"
   },
   "engines": {
@@ -23,7 +25,8 @@
   },
   "pkg": {
     "assets": [
-      "public/**/*"
+      "public/**/*",
+      "config/**/*"
     ]
   }
 }

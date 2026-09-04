@@ -13,7 +13,7 @@ import logging
 
 import pandas as pd
 from statsforecast import StatsForecast
-from statsforecast.models import AutoARIMA, AutoETS, AutoTheta, Naive
+from statsforecast.models import AutoARIMA, AutoETS, AutoTheta, Naive, RandomWalkWithDrift
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +38,7 @@ def default_models(season_length: int = DEFAULT_SEASON_LENGTH) -> list:
     """
     return [
         Naive(),
+        RandomWalkWithDrift(),
         AutoARIMA(season_length=season_length),
         AutoETS(season_length=season_length),
         AutoTheta(season_length=season_length),

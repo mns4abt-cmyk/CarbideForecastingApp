@@ -1,0 +1,21 @@
+{
+  "sources": [
+    { "id": "google-news", "kind": "google-news", "enabled": true },
+    {
+      "id": "eu-trade",
+      "kind": "rss",
+      "enabled": true,
+      "url": "https://policy.trade.ec.europa.eu/node/2/rss_en",
+      "sourceName": "European Commission DG Trade",
+      "language": "en"
+    },
+    {
+      "id": "eu-single-market",
+      "kind": "rss",
+      "enabled": true,
+      "url": "https://single-market-economy.ec.europa.eu/node/2/rss_en",
+      "sourceName": "European Commission DG GROW",
+      "language": "en"
+    }
+  ]
+}

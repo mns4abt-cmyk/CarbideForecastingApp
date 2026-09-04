@@ -20,9 +20,13 @@ Renditeverteilung haben):
      der realen Wochenpreisreihe die empirische Verteilung von `price[t+h]/price[t] - 1`
      über alle historisch verfügbaren t gebildet.
   2. `effective_severity()` = severity * confidence * relevance (alle in [0, 1]).
-  3. `quantile_for_direction()`: bullish -> 0.50 + 0.475*effectiveSeverity,
-     bearish -> 0.50 - 0.475*effectiveSeverity (begrenzt auf [0.025, 0.975]).
-  4. `quantile_target_returns()`: je Horizont h das empirische Quantil dieser Verteilung.
+  3. Die Richtung bestimmt die historische Teilverteilung: bullish verwendet nur
+     positive Forward-Returns, bearish nur die absoluten Beträge negativer
+     Forward-Returns. Dadurch bleibt jede Szenarioabweichung relativ zur Baseline
+     richtungskonsistent.
+  4. `directional_target_returns()`: Schwere/Konfidenz/Relevanz bestimmen das
+     Quantil INNERHALB dieser Richtungsteilmenge. Fehlen ausreichend Beobachtungen,
+     ist der konservative Fallback eine Nullabweichung (keine erfundene Rendite).
   5. `build_cumulative_return_path()`: glatter Wochenpfad zwischen den 4 Stützstellen
      (0, 4, 12, 26, 52 Wochen) per linearer Interpolation im LOG-Renditeraum (mathematisch
      konsistent mit Zinseszins/Compounding, vermeidet Knicke in einfachen Prozentrenditen).
@@ -61,6 +65,9 @@ HORIZONS_WEEKS: tuple[int, ...] = (4, 12, 26, 52)
 # Begrenzung der aus Schwere/Konfidenz/Relevanz abgeleiteten Quantile auf ca. 2,5%..97,5%
 # (effectiveSeverity in [0,1] * 0.475 => Quantil-Offset max. +-0.475 um den Median 0.50).
 QUANTILE_SPAN = 0.475
+DIRECTIONAL_QUANTILE_MIN = 0.025
+DIRECTIONAL_QUANTILE_MAX = 0.975
+MIN_DIRECTIONAL_OBSERVATIONS = 3
 
 # ---- Szenario-Vorlagen ------------------------------------------------------
 # Enthalten AUSSCHLIESSLICH qualitative Annahmen (Richtung, Schwere, Konfidenz,
@@ -222,6 +229,65 @@ def quantile_target_returns(distributions: dict[int, np.ndarray], quantile: floa
     return targets
 
 
+def directional_quantile_for_severity(eff_severity: float) -> float:
+    """Percentile innerhalb einer positiven bzw. negativen Teilverteilung.
+
+    Bei einer effektiven Schwere von 0 wird keine Anpassung erzeugt. Für jeden
+    positiven Wert liegt das Quantil konservativ zwischen 2,5% und 97,5% der
+    historischen Beträge derselben Richtung.
+    """
+    severity = clamp01(eff_severity)
+    return float(DIRECTIONAL_QUANTILE_MIN + (DIRECTIONAL_QUANTILE_MAX - DIRECTIONAL_QUANTILE_MIN) * severity)
+
+
+def directional_target_returns(
+    distributions: dict[int, np.ndarray], direction: str, eff_severity: float
+) -> tuple[dict[int, float], dict[int, dict]]:
+    """Liefert richtungskonsistente Renditeziele aus empirischen Teilverteilungen.
+
+    Bullish zieht ausschließlich aus beobachteten positiven Returns. Bearish zieht
+    ausschließlich aus den Beträgen beobachteter negativer Returns und setzt danach
+    ein negatives Vorzeichen. Damit ist bullish >= 0 und bearish <= 0 an jedem
+    Stützstellenhorizont. Bei weniger als ``MIN_DIRECTIONAL_OBSERVATIONS`` passenden
+    historischen Beobachtungen ist der dokumentierte konservative Fallback 0.0.
+    """
+    severity = clamp01(eff_severity)
+    quantile = directional_quantile_for_severity(severity)
+    targets: dict[int, float] = {}
+    details: dict[int, dict] = {}
+
+    for horizon, distribution in distributions.items():
+        values = np.asarray(distribution, dtype=float)
+        if direction == "bullish":
+            directional_values = values[values > 0]
+            sign = 1.0
+        elif direction == "bearish":
+            directional_values = -values[values < 0]
+            sign = -1.0
+        else:
+            directional_values = np.array([], dtype=float)
+            sign = 0.0
+
+        if severity <= 0 or len(directional_values) < MIN_DIRECTIONAL_OBSERVATIONS:
+            targets[horizon] = 0.0
+            details[horizon] = {
+                "directionalSampleSize": int(len(directional_values)),
+                "quantile": round(quantile, 4),
+                "fallback": "zero_adjustment" if severity <= 0 else "zero_adjustment_insufficient_directional_observations",
+            }
+            continue
+
+        magnitude = float(np.quantile(directional_values, quantile))
+        targets[horizon] = sign * magnitude
+        details[horizon] = {
+            "directionalSampleSize": int(len(directional_values)),
+            "quantile": round(quantile, 4),
+            "fallback": None,
+        }
+
+    return targets, details
+
+
 def build_cumulative_return_path(target_returns: dict[int, float], total_weeks: int) -> np.ndarray:
     """Glatter Wochenpfad kumulativer Renditen zwischen den Stützstellen (0,4,12,26,52 Wochen).
 
@@ -270,9 +336,10 @@ def _build_single_scenario(
     for market, relevance_key in (("china", "chinaRelevance"), ("eu", "euRelevance")):
         relevance = template[relevance_key]
         eff_severity = effective_severity(severity, confidence, relevance)
-        quantile = quantile_for_direction(direction, eff_severity)
-
-        target_returns = quantile_target_returns(distributions_by_market[market], quantile)
+        target_returns, directional_details = directional_target_returns(
+            distributions_by_market[market], direction, eff_severity
+        )
+        quantile = directional_quantile_for_severity(eff_severity)
 
         weekly_forecast = baseline[market]["weekly_forecast"]
         baseline_p50 = [row["p50"] for row in weekly_forecast]
@@ -297,6 +364,9 @@ def _build_single_scenario(
             "effectiveSeverity": round(eff_severity, 4),
             "quantile": round(quantile, 4),
             "targetReturnsByHorizonWeeks": {str(h): round(r, 4) for h, r in target_returns.items()},
+            "directionalCalibrationByHorizonWeeks": {
+                str(h): directional_details[h] for h in target_returns
+            },
         }
 
     return {
@@ -313,6 +383,13 @@ def _build_single_scenario(
         "metadata": {
             "method": "historical_quantile",
             "direction": direction,
+            # Dieselben bereits berechneten Werte zusätzlich auf Szenarioebene,
+            # damit der Frontend-Vertrag die Quantilkalibrierung ohne Kenntnis
+            # der internen byMarket-Struktur transparent machen kann.
+            "quantile": {market: metadata_by_market[market]["quantile"] for market in metadata_by_market},
+            "effectiveSeverity": {
+                market: metadata_by_market[market]["effectiveSeverity"] for market in metadata_by_market
+            },
             "byMarket": metadata_by_market,
         },
     }
