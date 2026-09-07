@@ -159,6 +159,20 @@ def _monthly_history_frame(series: pd.DataFrame, up_to_month: pd.Period, max_mon
     return df.groupby("month", as_index=False).last().sort_values("month").tail(max_months).reset_index(drop=True)
 
 
+def _forecast_horizons(weekly_forecast: list[dict], last_observed_price: float) -> dict:
+    """Expose exact weekly P50 checkpoints without changing monthly display data."""
+    horizons: dict = {}
+    for horizon_weeks in (4, 12, 26):
+        if len(weekly_forecast) < horizon_weeks:
+            continue
+        p50 = float(weekly_forecast[horizon_weeks - 1]["p50"])
+        horizons[f"{horizon_weeks}w"] = {
+            "p50": p50,
+            "changePct": round(((p50 / last_observed_price) - 1) * 100, 6),
+        }
+    return horizons
+
+
 def build_frontend_scenarios(weekly_df: pd.DataFrame, baseline: dict, frontend_markets: dict) -> list[dict]:
     """Erzeugt den Frontend-Szenariovertrag aus der statistischen Baseline.
 
@@ -326,6 +340,12 @@ def build_frontend_payload() -> dict:
             "p10": _reindex_forecast(market, "p10", forecast_months),
             "p50": _reindex_forecast(market, "p50", forecast_months),
             "p90": _reindex_forecast(market, "p90", forecast_months),
+            # Exact model-path checkpoints for horizon-specific diagnostics.
+            # The monthly display series above remains unchanged.
+            "forecast_horizons": _forecast_horizons(
+                baseline[market]["weekly_forecast"],
+                float(baseline[market]["last_observed"]["price"]),
+            ),
         }
 
     payload["scenarios"] = build_frontend_scenarios(weekly_df, baseline, payload)

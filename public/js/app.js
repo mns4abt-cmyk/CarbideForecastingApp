@@ -7,10 +7,12 @@
     highlightScenarios: null, // set by clicking a news item
     selectedNewsId: null,
     refreshing: false,
+    evidenceFusionHorizon: 12,
   };
 
   const els = {
     lastUpdate: document.getElementById("lastUpdate"),
+    unitDisplay: document.getElementById("unitDisplay"),
     regionToggle: document.getElementById("regionToggle"),
     scenarioToggles: document.getElementById("scenarioToggles"),
     chartSvg: document.getElementById("priceChart"),
@@ -26,6 +28,8 @@
     currentMarketDot: document.getElementById("currentMarketDot"),
     currentMarketChanges: document.getElementById("currentMarketChanges"),
     currentMarketSummary: document.getElementById("currentMarketSummary"),
+    evidenceFusionHorizons: document.getElementById("evidenceFusionHorizons"),
+    evidenceFusionContent: document.getElementById("evidenceFusionContent"),
   };
 
   // Von D abgeleitete Werte werden nach jedem Refresh neu berechnet (siehe recomputeDerived).
@@ -46,6 +50,10 @@
     const datePart = date.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" });
     const timePart = date.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
     return `${datePart}, ${timePart} Uhr`;
+  }
+
+  function updateUnitDisplay() {
+    els.unitDisplay.textContent = `Einheit: ${window.ForecastPresentation.unitForRegion(state.region)}`;
   }
 
   function lighten(hex, amount) {
@@ -199,6 +207,7 @@
       series,
       bands,
       unit,
+      nonNegativeAxis: state.region === "both",
     });
     renderLegend(series);
   }
@@ -253,15 +262,22 @@
     return `<span class="${cls}">${sign}${value.toFixed(1)}%</span>`;
   }
 
+  function scenarioBaselineDeltaSpan(value) {
+    if (value === null || value === undefined) return "";
+    const cls = value > 0.0001 ? "scenario-delta-up" : value < -0.0001 ? "scenario-delta-down" : "scenario-delta-flat";
+    return `<small class="scenario-baseline-delta ${cls}">${window.ForecastPresentation.formatPercentagePointDelta(value)}</small>`;
+  }
+
   function renderInsights() {
     const active = stressScenarios().filter((sc) => state.activeScenarios.has(sc.id));
+    const baselineScenario = D.SCENARIOS.find((sc) => sc.id === "base");
     els.insightsList.innerHTML = active.map((sc) => `
       <div class="insight-item">
         <div class="insight-head">
           <div class="insight-name"><span class="dot" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${sc.color}"></span>${sc.name}${sc.aiGenerated ? '<span class="ai-badge" title="Von der Bosch Model Farm generierte Einschätzung">KI</span>' : ""}</div>
           <div class="insight-changes">
-            <span title="China, 12 Monate">CN: ${changeSpan(sc.expectedChange12m.china)}</span>
-            <span title="EU, 12 Monate">EU: ${changeSpan(sc.expectedChange12m.eu)}</span>
+            <span title="China, 12 Monate">CN: ${changeSpan(sc.expectedChange12m.china)}${window.ForecastPresentation.shouldShowScenarioDelta(sc) ? scenarioBaselineDeltaSpan(window.ForecastPresentation.scenarioDeltaPct(sc, baselineScenario, "china")) : ""}</span>
+            <span title="EU, 12 Monate">EU: ${changeSpan(sc.expectedChange12m.eu)}${window.ForecastPresentation.shouldShowScenarioDelta(sc) ? scenarioBaselineDeltaSpan(window.ForecastPresentation.scenarioDeltaPct(sc, baselineScenario, "eu")) : ""}</span>
           </div>
         </div>
         <p class="insight-text">${sc.summary}</p>
@@ -269,7 +285,7 @@
     `).join("");
   }
 
-  // ---- Aktuelle Marktlage (news-adjustiertes Szenario, separate Karte) --------------------
+  // ---- News-Lage (separate Einordnung, keine statistische Baseline-Anpassung) -------------
   function renderCurrentMarketCard() {
     const sc = D.SCENARIOS.find((s) => s.id === "currentMarket");
     if (!sc) {
@@ -303,10 +319,31 @@
     }
   }
 
+  // ---- Evidenz-Check (rein erklärend; verwendet ausschließlich API-Fusionsergebnisse) -----
+  function renderEvidenceFusion() {
+    els.evidenceFusionContent.innerHTML = window.EvidenceFusionPanel.render({
+      fusion: D.EVIDENCE_FUSION,
+      region: state.region,
+      horizonWeeks: state.evidenceFusionHorizon,
+    });
+    els.evidenceFusionHorizons.querySelectorAll("button").forEach((button) => {
+      button.classList.toggle("active", Number(button.dataset.horizon) === state.evidenceFusionHorizon);
+    });
+  }
+
+  function wireEvidenceFusionHorizons() {
+    els.evidenceFusionHorizons.querySelectorAll("button").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.evidenceFusionHorizon = Number(button.dataset.horizon);
+        renderEvidenceFusion();
+      });
+    });
+  }
+
   // ---- News / Voices of the Market ----------------------------------
   function renderNews() {
     if (!D.NEWS.length) {
-      els.newsList.innerHTML = `<p class="news-empty">Aktuell keine News verfügbar. Klicke auf "Aktualisieren", um echte Artikel von Google News abzurufen.</p>`;
+      els.newsList.innerHTML = `<p class="news-empty">Aktuell keine Meldungen verfügbar. Klicke auf "Aktualisieren", um konfigurierte Nachrichtenquellen abzurufen.</p>`;
       return;
     }
     els.newsList.innerHTML = D.NEWS.map((n) => {
@@ -357,7 +394,9 @@
         state.region = btn.dataset.region;
         els.regionToggle.querySelectorAll(".region-btn").forEach((b) => b.classList.remove("active"));
         btn.classList.add("active");
+        updateUnitDisplay();
         renderChart();
+        renderEvidenceFusion();
       });
     });
   }
@@ -415,6 +454,7 @@
         SCENARIOS: json.scenarios,
         NEWS: json.news,
         BASELINE: json.baseline || null,
+        EVIDENCE_FUSION: json.evidenceFusion || null,
       };
       recomputeDerived();
       setAiPill(json.aiEnabled);
@@ -422,13 +462,14 @@
 
       renderScenarioToggles();
       renderCurrentMarketCard();
+      renderEvidenceFusion();
       renderChart();
       renderInsights();
       renderNews();
 
       const newsNote = json.newsSource === "live"
-        ? " Echte News per Google News geladen."
-        : " Aktuell keine News von Google News abrufbar.";
+        ? " Meldungen aus konfigurierten Quellen geladen."
+        : " Aktuell keine Meldungen aus konfigurierten Quellen abrufbar.";
       if (json.aiEnabled) {
         showToast(`Aktualisiert – Szenario-Einschätzungen wurden per KI (Bosch Model Farm) neu generiert.${newsNote}`, "success");
       } else if (json.aiError) {
@@ -449,7 +490,10 @@
   function init() {
     els.lastUpdate.textContent = fmtDateTime(new Date());
     wireRegionToggle();
+    updateUnitDisplay();
+    wireEvidenceFusionHorizons();
     renderScenarioToggles();
+    renderEvidenceFusion();
     renderChart();
     renderInsights();
     renderNews();

@@ -155,12 +155,32 @@ body {
 .legend-swatch { width: 14px; height: 3px; border-radius: 2px; }
 .legend-swatch.dashed { background-image: linear-gradient(90deg, currentColor 50%, transparent 50%); background-size: 8px 3px; height: 0; border-top: 3px dashed currentColor; }
 
-/* ---------- Aktuelle Marktlage (news-adjustiertes Szenario, separat von den Stress-Szenarien) ---------- */
+/* ---------- News-Lage (separate Einordnung, separat von den Stress-Szenarien) ---------- */
 .current-market-card { border-color: #cfe8de; }
 .current-market-card .insight-changes { margin: 12px 0 4px; font-size: 0.85rem; font-weight: 700; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 .current-market-card .insight-text { margin-top: 8px; }
+.current-market-scenario-label { margin: 12px 0 -6px; color: var(--text-muted); font-size: 0.76rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.25px; }
+.current-market-note { margin: 8px 0 0; color: var(--text-muted); font-size: 0.76rem; font-style: italic; }
 #currentMarketToggleWrap { background: #fff; }
 #currentMarketDot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+
+/* ---------- Evidenz-Check (read-only Fusion-Erklärung) ---------- */
+.evidence-fusion-card { border-color: #d9e0f0; }
+.evidence-fusion-horizons { display: flex; gap: 4px; padding: 3px; border-radius: 999px; background: #f0f2f5; }
+.evidence-fusion-horizons button {
+  border: 0; background: transparent; color: var(--text-muted); border-radius: 999px;
+  padding: 5px 9px; font: inherit; font-size: 0.75rem; font-weight: 600; cursor: pointer;
+}
+.evidence-fusion-horizons button.active { background: var(--accent); color: #fff; }
+.evidence-fusion-content { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-top: 14px; }
+.evidence-fusion-market { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+.evidence-fusion-market h3 { margin: 0 0 9px; font-size: 0.9rem; }
+.evidence-fusion-section { display: flex; flex-direction: column; gap: 2px; margin-top: 9px; font-size: 0.79rem; color: var(--text-muted); line-height: 1.35; }
+.evidence-fusion-section:first-of-type { margin-top: 0; }
+.evidence-fusion-section strong { color: var(--text); font-size: 0.84rem; }
+.evidence-fusion-label { color: var(--text-muted); font-size: 0.71rem; font-weight: 700; letter-spacing: 0.25px; text-transform: uppercase; }
+.evidence-fusion-unavailable { margin: 0; color: var(--text-muted); font-size: 0.82rem; }
+.evidence-fusion-note { margin: 12px 0 0; color: var(--text-muted); font-size: 0.76rem; font-style: italic; }
 
 /* ---------- Insights ---------- */
 .insights-sub { margin: 0 0 12px; font-size: 0.82rem; color: var(--text-muted); }
@@ -169,6 +189,11 @@ body {
 .insight-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
 .insight-name { font-weight: 700; font-size: 0.9rem; display: flex; align-items: center; gap: 8px; }
 .insight-changes { display: flex; gap: 10px; font-size: 0.8rem; font-weight: 700; }
+.insight-changes > span { display: flex; flex-direction: column; gap: 2px; }
+.scenario-baseline-delta { font-size: 0.68rem; font-weight: 600; }
+.scenario-delta-up { color: #a54a37; }
+.scenario-delta-down { color: #277969; }
+.scenario-delta-flat { color: var(--neutral); }
 .change-up { color: var(--bullish); }
 .change-down { color: var(--bearish); }
 .change-flat { color: var(--neutral); }

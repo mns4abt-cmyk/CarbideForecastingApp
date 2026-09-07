@@ -18,7 +18,7 @@
 - `forecasting/load_data.py` reads EU `data_table` (`PriceDate`, `Price`, expected `USD/mtu WO3`) and China `Sheet1` (`日期` + `MID`, CNY/kg APT), cleans them, and resamples each to Friday-ending weeks using only each week's final actual observation (no filling).
 - `forecasting/backtest.py` uses rolling/expanding walk-forward validation at 4, 12, and 26 weeks. It compares Naive, AutoARIMA, AutoETS, and AutoTheta; a complex model must beat Naive at a majority of horizons.
 - `forecasting/pipeline.py` fits the selected model on real history, forecasts 52 weeks with an 80% interval (P10/P50/P90), and emits 24 monthly historical points plus up to 12 monthly forecast points for the frontend.
-- `server.js` executes `forecasting/pipeline.py --json` for each refresh. Python and its dependencies must be available (`FORECAST_PYTHON`, otherwise `python`).
+- `server.js` executes `forecasting/pipeline.py --json` for each refresh. Python is resolved cross-platform: `FORECAST_PYTHON` is the explicit override, then project-local `.venv`/`venv`, then platform commands. No machine-specific path is committed.
 
 ## Scenarios
 - `forecasting/scenarios.py` contains the intended historically calibrated stress-test engine: qualitative assumptions map to quantiles of empirical 4/12/26/52-week forward-return distributions and are applied multiplicatively to the statistical baseline.
@@ -32,6 +32,7 @@
 - Deterministic relevance filtering occurs before LLM selection. At most `MAX_LLM_ARTICLES` (default 12), ranked by relevance then recency, are classified from title/snippet/publisher/date only; Ollama processes them sequentially in `OLLAMA_BATCH_SIZE` batches (default 3), preserving successful batches if another fails. No price, baseline, scenario, or forecast data enters the LLM.
 - The LLM extracts `supplyEffect`, `demandEffect`, and `eventStage`; `lib/newsCausality.js` deterministically derives production direction and records LLM disagreements. Study/exploration/speculative supply is not current supply. `lib/newsEventDedup.js` conservatively deduplicates syndicated events before signal aggregation, while response provenance remains visible. `lib/newsClassificationCache.js` caches validated classifications under `.cache/`, keyed by article content, model, and schema version.
 - Classifications also contain `globalRelevance` (materiality to the international tungsten/APT supply-demand balance, not popularity), distinct from direct China/EU relevance. `eventStage` deterministically maps to evidence maturity (`realized`, `prospective`, `speculative`, `unclear`) and conservatively caps prospective/speculative severity. `lib/newsEventEvidence.js` emits provider-neutral event evidence with provenance; it is not Evidence Fusion and has no numerical forecast impact.
+- `lib/evidenceFusion.js` produces read-only, horizon-specific baseline/news corroboration diagnostics. `/api/refresh` exposes it as `evidenceFusion`; it must never influence the baseline, scenarios, `currentMarket`, model selection, reliability, or chart values.
 - Forecasting remains independent from news/LLM. `lib/newsSignals.js` aggregates only successfully validated classifications with a 14-day freshness half-life; unavailable/malformed LLM output creates no market signal and leaves `currentMarket` baseline-equivalent.
 
 ## Bootstrap/legacy caveat

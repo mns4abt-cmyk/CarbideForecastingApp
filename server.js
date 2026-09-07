@@ -45,6 +45,8 @@ const { normalizeCausalClassification, normalizeGlobalRelevance } = require("./l
 const { deduplicateEvents } = require("./lib/newsEventDedup");
 const { buildEventEvidence } = require("./lib/newsEventEvidence");
 const { NewsClassificationCache } = require("./lib/newsClassificationCache");
+const { buildEvidenceFusionDiagnostics } = require("./lib/evidenceFusionIntegration");
+const { resolvePythonInterpreter } = require("./lib/pythonResolver");
 
 const app = express();
 app.use(express.json());
@@ -89,8 +91,8 @@ const classificationCache = new NewsClassificationCache({
 });
 
 // ---- Python-Forecasting-Pipeline (echte Excel-Daten + Backtest-Modellauswahl) ------------
-// 1. FORECAST_PYTHON aus .env, falls gesetzt. 2. Sonst "python" (muss im PATH liegen).
-const FORECAST_PYTHON = process.env.FORECAST_PYTHON || "python";
+// The interpreter is resolved and minimally probed cross-platform before each
+// refresh; FORECAST_PYTHON remains the explicit first-choice override.
 const FORECAST_SCRIPT = path.join(appDir, "forecasting", "pipeline.py");
 const SCENARIOS_SCRIPT = path.join(appDir, "forecasting", "scenarios.py");
 const FORECAST_TIMEOUT_MS = Number(process.env.FORECAST_TIMEOUT_MS) || 120000;
@@ -108,20 +110,15 @@ function formatMonthLabel(isoMonth) {
 // vom Python-Skript auf stdout geschriebene JSON (build_frontend_payload); Python-Logging
 // geht laut Skript-Konvention ausschließlich an stderr.
 async function runForecastingPipeline() {
+  const interpreter = await resolvePythonInterpreter({ appDir });
   let stdout, stderr;
   try {
     ({ stdout, stderr } = await execFileAsync(
-      FORECAST_PYTHON,
-      [FORECAST_SCRIPT, "--json"],
+      interpreter.command,
+      [...interpreter.argsPrefix, FORECAST_SCRIPT, "--json"],
       { cwd: appDir, timeout: FORECAST_TIMEOUT_MS, maxBuffer: 20 * 1024 * 1024 }
     ));
   } catch (err) {
-    if (err.code === "ENOENT") {
-      throw new Error(
-        `Python-Interpreter "${FORECAST_PYTHON}" konnte nicht gestartet werden. ` +
-        `FORECAST_PYTHON in .env setzen oder sicherstellen, dass "python" im PATH liegt.`
-      );
-    }
     if (err.killed || err.signal === "SIGTERM") {
       throw new Error(`Forecasting-Pipeline hat das Zeitlimit von ${FORECAST_TIMEOUT_MS}ms überschritten.`);
     }
@@ -135,7 +132,7 @@ async function runForecastingPipeline() {
   }
 
   try {
-    return JSON.parse(stdout);
+    return { pipelineResult: JSON.parse(stdout), interpreter };
   } catch (err) {
     throw new Error("Forecasting-Pipeline hat kein valides JSON auf stdout geliefert.");
   }
@@ -147,7 +144,7 @@ async function runForecastingPipeline() {
 // lib/newsSignals.js) - an keiner Stelle fließt ein vom LLM erzeugter Preiswert ein. Läuft als
 // eigenständiger Python-Aufruf (eigener Backtest/Fit) NACH der News-/KI-Verarbeitung, da
 // marketState erst zu diesem Zeitpunkt bekannt ist.
-async function runCurrentMarketScenario(chinaScore, euScore, available) {
+async function runCurrentMarketScenario(chinaScore, euScore, available, interpreter) {
   const args = [
     SCENARIOS_SCRIPT,
     "--current-market",
@@ -160,8 +157,8 @@ async function runCurrentMarketScenario(chinaScore, euScore, available) {
   let stdout, stderr;
   try {
     ({ stdout, stderr } = await execFileAsync(
-      FORECAST_PYTHON,
-      args,
+      interpreter.command,
+      [...interpreter.argsPrefix, ...args],
       { cwd: appDir, timeout: FORECAST_TIMEOUT_MS, maxBuffer: 20 * 1024 * 1024 }
     ));
   } catch (err) {
@@ -355,8 +352,11 @@ app.post("/api/refresh", async (req, res) => {
     // Echte Historie + per Backtest gewähltes Modell/p50-Prognose aus forecasting/pipeline.py
     // (Excel-Daten) statt der illustrativen Konstanten aus public/js/data.js.
     let pipelineResult;
+    let pythonInterpreter;
     try {
-      pipelineResult = await runForecastingPipeline();
+      const forecastRun = await runForecastingPipeline();
+      pipelineResult = forecastRun.pipelineResult;
+      pythonInterpreter = forecastRun.interpreter;
     } catch (err) {
       console.error("[Forecasting] Pipeline-Aufruf fehlgeschlagen:", err.message);
       return res.status(502).json({
@@ -446,6 +446,10 @@ app.post("/api/refresh", async (req, res) => {
     newsDiagnostics.eventRepresentativeCount = eventDeduplication.representatives.length;
     newsDiagnostics.duplicateArticleCount = classifiedEvidence.length - eventDeduplication.representatives.length;
 
+    // Additive, read-only diagnostic metadata. Fusion receives the unique event
+    // evidence only; it cannot alter forecasts, scenarios, currentMarket, or the UI.
+    const evidenceFusion = buildEvidenceFusionDiagnostics({ pipelineResult, eventEvidence });
+
     // Reine Signal-Aggregation (lib/newsSignals.js) aus den bereits klassifizierten News -
     // fließt aktuell NICHT in die numerische Prognose ein, siehe dortige Dokumentation.
     const marketState = aggregateMarketState(
@@ -474,7 +478,8 @@ app.post("/api/refresh", async (req, res) => {
       currentMarketScenario = await runCurrentMarketScenario(
         marketState.china.overall,
         marketState.eu.overall,
-        currentMarketAvailable
+        currentMarketAvailable,
+        pythonInterpreter
       );
       currentMarketScenario.summary = buildCurrentMarketSummary({
         newsSource, aiEnabled, news, marketState,
@@ -492,6 +497,7 @@ app.post("/api/refresh", async (req, res) => {
       aiError,
       classificationStatus: aiEnabled ? "available" : "unavailable",
       llmProvider: newsClassifier.id,
+      pythonInterpreter: pythonInterpreter.display,
       newsSource,
       history: {
         labels: pipelineResult.history.labels.map(formatMonthLabel),
@@ -509,6 +515,7 @@ app.post("/api/refresh", async (req, res) => {
       scenarios,
       news,
       eventEvidence,
+      evidenceFusion,
       newsDiagnostics,
       marketState,
     });

@@ -2,7 +2,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { fuseEvidence, horizonWeight } = require("../lib/evidenceFusion");
+const { eventComponents, fuseEvidence, horizonWeight } = require("../lib/evidenceFusion");
 
 function baseline(forecastChangePct = 2, reliability = "LOW") {
   return { forecastChangePct, reliability };
@@ -144,4 +144,19 @@ test("baseline reliability is copied unchanged and Fusion never applies a numeri
   assert.equal(result.baselineEvidence.reliability, "VERY_LOW");
   assert.equal(result.numericalAdjustmentApplied, false);
   assert.equal(result.baselineEvidence.forecastChangePct, 2);
+});
+
+test("exported diagnostic components match Fusion's existing contribution without changing its output schema", () => {
+  const evidence = event({ severity: 0.2, confidence: 0.8, chinaRelevance: 0, globalRelevance: 0.35, horizonWeeks: 4 });
+  const component = eventComponents(evidence, "china", 12);
+  const result = fuse([evidence]);
+
+  assert.equal(component.effectiveRelevance, 0.12249999999999998);
+  assert.equal(component.horizonWeight, horizonWeight(4, 12));
+  assert.equal(component.eventWeight, 0.2 * component.effectiveRelevance * component.horizonWeight * 0.8);
+  assert.deepEqual(Object.keys(result.newsEvidence), [
+    "direction", "signedBalance", "strength", "extractionConfidence", "classifiedEvents", "directionalEvents",
+    "neutralEvents", "realizedDirectionalEvents", "prospectiveDirectionalEvents", "speculativeDirectionalEvents", "eventIds",
+  ]);
+  assert.equal(result.numericalAdjustmentApplied, false);
 });

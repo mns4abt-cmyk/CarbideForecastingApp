@@ -3,7 +3,7 @@
 import unittest
 
 from forecasting.load_data import load_weekly_market_data
-from forecasting.pipeline import build_baseline_forecast
+from forecasting.pipeline import _forecast_horizons, build_baseline_forecast
 
 
 class BaselineForecastTests(unittest.TestCase):
@@ -25,6 +25,16 @@ class BaselineForecastTests(unittest.TestCase):
                 self.assertGreater(row["p10"], 0)
                 self.assertLessEqual(row["p10"], row["p50"])
                 self.assertLessEqual(row["p50"], row["p90"])
+
+    def test_exact_horizon_checkpoints_use_weekly_forecast_positions(self):
+        weekly = [
+            {"p50": float(100 + week)}
+            for week in range(1, 53)
+        ]
+        horizons = _forecast_horizons(weekly, 100.0)
+        self.assertEqual(horizons["4w"], {"p50": 104.0, "changePct": 4.0})
+        self.assertEqual(horizons["12w"], {"p50": 112.0, "changePct": 12.0})
+        self.assertEqual(horizons["26w"], {"p50": 126.0, "changePct": 26.0})
 
 
 if __name__ == "__main__":

@@ -10,6 +10,7 @@
     "test": "node --test",
     "diagnose:news": "node scripts/diagnose-news.js",
     "diagnose:ai": "node scripts/diagnose-ai.js",
+    "diagnose:fusion": "node scripts/diagnose-fusion.js",
     "package:win": "pkg server.js --config package.json --targets node22-win-x64 --output dist/CarbideMarktradar.exe"
   },
   "engines": {

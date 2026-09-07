@@ -14,7 +14,7 @@
   /**
    * @param {SVGSVGElement} svg
    * @param {HTMLElement} tooltipEl
-   * @param {object} cfg { labels, historyCount, series:[{id,label,color,dashed,data[]}], unit,
+   * @param {object} cfg { labels, historyCount, series:[{id,label,color,dashed,data[]}], unit, nonNegativeAxis,
    *                        bands:[{id,regionLabel,color,p10[],p50[],p90[]}] }
    */
   function renderPriceChart(svg, tooltipEl, cfg) {
@@ -51,6 +51,7 @@
     if (!isFinite(min)) { min = 0; max = 1; }
     const pad = (max - min) * 0.12 || max * 0.1 || 1;
     min -= pad; max += pad;
+    min = window.ForecastPresentation.nonNegativeAxisMinimum(min, cfg.nonNegativeAxis);
 
     const x = (i) => margin.left + (innerW * i) / (n - 1);
     const y = (v) => margin.top + innerH - ((v - min) / (max - min)) * innerH;
