@@ -9,6 +9,7 @@ const {
   batchArticles,
   CLASSIFICATION_SCHEMA,
   classifySequentialBatches,
+  describeClassificationFailure,
   DIRECTION_EXAMPLES,
   OllamaProvider,
   buildClassificationPrompt,
@@ -78,6 +79,54 @@ test("a failed batch preserves classifications from successful sequential batche
   assert.deepEqual(calls, [["id-0", "id-1", "id-2"], ["id-3", "id-4", "id-5"]]);
   assert.equal(result.classifications.size, 3);
   assert.deepEqual(result.failedBatches, [["id-3", "id-4", "id-5"]]);
+  assert.equal(result.successfulBatches, 1);
+  assert.equal(result.failedBatchDetails[0].error.type, "unknown");
+});
+
+test("Ollama requests remain direct when proxy environment variables are present", async () => {
+  const original = process.env.HTTP_PROXY;
+  process.env.HTTP_PROXY = "http://corporate-proxy.example:8080";
+  let requestOptions;
+  try {
+    const provider = new OllamaProvider({ fetch: async (_url, options) => {
+      requestOptions = options;
+      return { ok: true, json: async () => ({ message: { content: JSON.stringify({ classifications: [classification("a")] }) } }) };
+    } });
+    await provider.classify([item("a")]);
+    assert.equal(requestOptions.dispatcher, undefined);
+  } finally {
+    if (original === undefined) delete process.env.HTTP_PROXY;
+    else process.env.HTTP_PROXY = original;
+  }
+});
+
+test("batch diagnostics distinguish timeout, connection, and validation failures", () => {
+  assert.deepEqual(describeClassificationFailure({ name: "AbortError" }), { type: "timeout", code: "REQUEST_TIMEOUT" });
+  assert.deepEqual(describeClassificationFailure({ code: "ECONNREFUSED" }), { type: "connection", code: "ECONNREFUSED" });
+  assert.deepEqual(describeClassificationFailure(new Error("classifier returned incomplete batch")), { type: "validation", code: "INVALID_CLASSIFICATION" });
+});
+
+test("complete batch failure is isolated and returns a safe empty result", async () => {
+  const provider = { classify: async () => { throw Object.assign(new Error("offline"), { code: "ECONNREFUSED" }); } };
+  const result = await classifySequentialBatches(provider, [item("a"), item("b")], 1);
+  assert.equal(result.classifications.size, 0);
+  assert.equal(result.failedBatches.length, 2);
+  assert.deepEqual(result.failedBatchDetails.map((detail) => detail.error.type), ["connection", "connection"]);
+});
+
+test("Ollama timeout is applied independently to each sequential batch", async () => {
+  const signals = [];
+  const provider = new OllamaProvider({
+    timeoutMs: 5,
+    fetch: async (_url, options) => new Promise((_resolve, reject) => {
+      signals.push(options.signal);
+      options.signal.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })), { once: true });
+    }),
+  });
+  const result = await classifySequentialBatches(provider, [item("a"), item("b")], 1);
+  assert.equal(result.failedBatches.length, 2);
+  assert.notEqual(signals[0], signals[1]);
+  assert.deepEqual(result.failedBatchDetails.map((detail) => detail.error.type), ["timeout", "timeout"]);
 });
 
 test("article-only prompt excludes hidden numerical model data", () => {

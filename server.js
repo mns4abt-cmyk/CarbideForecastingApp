@@ -47,6 +47,8 @@ const { buildEventEvidence } = require("./lib/newsEventEvidence");
 const { NewsClassificationCache } = require("./lib/newsClassificationCache");
 const { buildEvidenceFusionDiagnostics } = require("./lib/evidenceFusionIntegration");
 const { resolvePythonInterpreter } = require("./lib/pythonResolver");
+const { deriveClassificationStatus } = require("./lib/aiRefreshStatus");
+const { getOllamaRuntimeConfig } = require("./lib/ollamaRuntimeConfig");
 
 const app = express();
 app.use(express.json());
@@ -65,8 +67,7 @@ const LLM_PROVIDER = (process.env.LLM_PROVIDER || "ollama").toLowerCase();
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434";
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "qwen3:4b";
 const MAX_LLM_ARTICLES = Math.min(12, Math.max(1, Number(process.env.MAX_LLM_ARTICLES) || 12));
-const OLLAMA_BATCH_SIZE = Math.min(12, Math.max(1, Number(process.env.OLLAMA_BATCH_SIZE) || 3));
-const OLLAMA_TIMEOUT_MS = Math.max(1000, Number(process.env.OLLAMA_TIMEOUT_MS) || 75000);
+const { batchSize: OLLAMA_BATCH_SIZE, timeoutMs: OLLAMA_TIMEOUT_MS } = getOllamaRuntimeConfig();
 const CLASSIFICATION_SCHEMA_VERSION = "causal-v3";
 
 // Firmenproxy: Node's fetch nutzt HTTP_PROXY/HTTPS_PROXY NICHT automatisch, daher explizit über undici ProxyAgent.
@@ -76,7 +77,8 @@ const NEWS_SOURCES_CONFIG = JSON.parse(fs.readFileSync(path.join(appDir, "config
 const newsClassifier = createNewsClassifierProvider({
   providerId: LLM_PROVIDER,
   fetch,
-  dispatcher: proxyDispatcher,
+  // Ollama is local-only and must never receive the corporate proxy dispatcher.
+  dispatcher: LLM_PROVIDER === "bmf" ? proxyDispatcher : undefined,
   baseUrl: LLM_PROVIDER === "bmf" ? BMF_BASE_URL : OLLAMA_BASE_URL,
   apiKey: BMF_API_KEY,
   model: LLM_PROVIDER === "bmf" ? BMF_MODEL : OLLAMA_MODEL,
@@ -398,24 +400,50 @@ app.post("/api/refresh", async (req, res) => {
 
     let aiEnabled = false;
     let aiError = null;
+    let aiProvider;
+    try {
+      aiProvider = await newsClassifier.health();
+    } catch {
+      aiProvider = {
+        provider: newsClassifier.id,
+        configured: false,
+        reachable: false,
+        model: null,
+        modelAvailable: false,
+        available: false,
+        lastSuccessfulCall: null,
+      };
+    }
+    let classificationResult = {
+      classifications: new Map(), failedBatches: [], failedBatchDetails: [], batchCount: 0, successfulBatches: 0, durationMs: 0,
+    };
+    let selectedCount = 0;
+    let classifiedFromCache = 0;
 
     if (newsSource === "live") {
       try {
         const selected = selectArticlesForClassification(news, MAX_LLM_ARTICLES);
+        selectedCount = selected.length;
         const classifications = new Map();
         const fresh = [];
-        let classifiedFromCache = 0;
         selected.forEach((item) => {
           const cached = classificationCache.get(item);
           if (cached) { classifications.set(item.id, cached); classifiedFromCache++; }
           else fresh.push(item);
         });
-        const freshResult = await classifySequentialBatches(
-          newsClassifier,
-          fresh,
-          newsClassifier.id === "ollama" ? OLLAMA_BATCH_SIZE : MAX_LLM_ARTICLES
-        );
-        freshResult.classifications.forEach((classification, id) => {
+        if (fresh.length && aiProvider.available) {
+          classificationResult = await classifySequentialBatches(
+            newsClassifier,
+            fresh,
+            newsClassifier.id === "ollama" ? OLLAMA_BATCH_SIZE : MAX_LLM_ARTICLES
+          );
+        } else if (fresh.length) {
+          classificationResult = {
+            ...classificationResult,
+            batchCount: Math.ceil(fresh.length / (newsClassifier.id === "ollama" ? OLLAMA_BATCH_SIZE : MAX_LLM_ARTICLES)),
+          };
+        }
+        classificationResult.classifications.forEach((classification, id) => {
           classifications.set(id, classification);
           const item = fresh.find((candidate) => candidate.id === id);
           if (item) classificationCache.set(item, classification);
@@ -423,9 +451,9 @@ app.post("/api/refresh", async (req, res) => {
         selected.filter((item) => classifications.has(item.id))
           .forEach((item) => applyNewsClassification(item, classifications.get(item.id)));
         aiEnabled = classifications.size > 0;
-        newsDiagnostics.classifiedFresh = freshResult.classifications.size;
+        newsDiagnostics.classifiedFresh = classificationResult.classifications.size;
         newsDiagnostics.classifiedFromCache = classifiedFromCache;
-        if (freshResult.failedBatches.length) {
+        if (classificationResult.failedBatches.length) {
           aiError = classifications.size
             ? "Ein Teil der KI-Klassifizierungen ist aktuell nicht verfügbar."
             : "KI-Kommentierung aktuell nicht verfügbar – zeige modellbasierte Standardtexte.";
@@ -437,6 +465,35 @@ app.post("/api/refresh", async (req, res) => {
     }
 
     if (newsSource === "live") applyFallbackClassification(news);
+
+    const classificationStatus = deriveClassificationStatus({
+      providerAvailable: aiProvider.available,
+      selectedCount,
+      classifiedCount: newsDiagnostics.classifiedFresh + classifiedFromCache,
+      failedBatches: classificationResult.failedBatches.length,
+    });
+    if (classificationStatus === "unavailable" && !aiError) {
+      aiError = "KI-Kommentierung aktuell nicht verf\u00fcgbar \u2013 zeige modellbasierte Standardtexte.";
+    }
+    const aiDiagnostic = {
+      code: classificationResult.failedBatchDetails[0]?.error?.code || (aiProvider.available ? null : "PROVIDER_UNAVAILABLE"),
+      provider: newsClassifier.id,
+      model: aiProvider.model,
+      providerAvailable: aiProvider.available,
+      selectedForLlm: selectedCount,
+      freshForLlm: Math.max(0, selectedCount - classifiedFromCache),
+      batchCount: classificationResult.batchCount,
+      successfulBatches: classificationResult.successfulBatches,
+      failedBatches: classificationResult.failedBatchDetails,
+      classifiedFresh: newsDiagnostics.classifiedFresh,
+      classifiedFromCache,
+      failedClassification: Math.max(0, selectedCount - newsDiagnostics.classifiedFresh - classifiedFromCache),
+      durationMs: classificationResult.durationMs,
+      refreshSucceeded: true,
+    };
+    if (classificationStatus === "failed" || classificationStatus === "partial" || classificationStatus === "unavailable") {
+      console.warn("[AI classification]", JSON.stringify({ stage: "classification", classificationStatus, ...aiDiagnostic }));
+    }
 
     // Keep all article provenance in the response, but count only one representative
     // of a conservatively detected syndicated event as evidence.
@@ -495,8 +552,11 @@ app.post("/api/refresh", async (req, res) => {
       generatedAt: new Date().toISOString(),
       aiEnabled,
       aiError,
-      classificationStatus: aiEnabled ? "available" : "unavailable",
+      classificationStatus,
       llmProvider: newsClassifier.id,
+      aiProvider,
+      aiProviderAvailable: aiProvider.available,
+      aiDiagnostic,
       pythonInterpreter: pythonInterpreter.display,
       newsSource,
       history: {

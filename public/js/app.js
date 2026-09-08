@@ -411,11 +411,11 @@
     toastTimer = setTimeout(() => { els.toast.hidden = true; }, 5000);
   }
 
-  function setAiPill(configured) {
-    if (configured === null) { els.aiStatusPill.hidden = true; return; }
+  function setAiPill(status) {
+    if (status === null) { els.aiStatusPill.hidden = true; return; }
     els.aiStatusPill.hidden = false;
-    els.aiStatusPill.textContent = configured ? "KI-Kommentierung aktiv" : "KI-Kommentierung inaktiv";
-    els.aiStatusPill.classList.toggle("off", !configured);
+    els.aiStatusPill.textContent = status.text;
+    els.aiStatusPill.classList.toggle("off", status.off);
   }
 
   async function fetchStatus() {
@@ -423,7 +423,7 @@
       const res = await fetch("/api/status");
       if (!res.ok) throw new Error("status nicht erreichbar");
       const json = await res.json();
-      setAiPill(json.aiConfigured);
+      setAiPill(AiStatus.pillState({ aiProviderAvailable: json.aiConfigured, classificationStatus: json.aiConfigured ? "no_input" : "unavailable" }));
     } catch (e) {
       // Kein Backend erreichbar (z.B. Datei direkt im Browser geöffnet) -> Pill ausblenden, App bleibt offline nutzbar.
       setAiPill(null);
@@ -457,7 +457,7 @@
         EVIDENCE_FUSION: json.evidenceFusion || null,
       };
       recomputeDerived();
-      setAiPill(json.aiEnabled);
+      setAiPill(AiStatus.pillState(json));
       els.lastUpdate.textContent = fmtDateTime(json.generatedAt ? new Date(json.generatedAt) : new Date());
 
       renderScenarioToggles();
