@@ -6,6 +6,7 @@
     activeScenarios: new Set(D.SCENARIOS.map((s) => s.id)),
     highlightScenarios: null, // set by clicking a news item
     selectedNewsId: null,
+    selectedOutcomeEventKey: null,
     refreshing: false,
     evidenceFusionHorizon: 12,
   };
@@ -24,10 +25,22 @@
     aiStatusPill: document.getElementById("aiStatusPill"),
     toast: document.getElementById("toast"),
     currentMarketCard: document.getElementById("currentMarketCard"),
+    currentMarketToggleWrap: document.getElementById("currentMarketToggleWrap"),
     currentMarketToggle: document.getElementById("currentMarketToggle"),
     currentMarketDot: document.getElementById("currentMarketDot"),
     currentMarketChanges: document.getElementById("currentMarketChanges"),
     currentMarketSummary: document.getElementById("currentMarketSummary"),
+    currentMarketLabel: document.getElementById("currentMarketLabel"),
+    newsLageTitle: document.getElementById("newsLageTitle"),
+    newsLageScale: document.getElementById("newsLageScale"),
+    newsLageMethodology: document.getElementById("newsLageMethodology"),
+    newsLageDetails: document.getElementById("newsLageDetails"),
+    newsLageEvents: document.getElementById("newsLageEvents"),
+    newsLageEventsContent: document.getElementById("newsLageEventsContent"),
+    eventOutcomesPanel: document.getElementById("eventOutcomesPanel"),
+    eventOutcomesContent: document.getElementById("eventOutcomesContent"),
+    historicalAssociationCard: document.getElementById("historicalAssociationCard"),
+    historicalAssociationContent: document.getElementById("historicalAssociationContent"),
     evidenceFusionHorizons: document.getElementById("evidenceFusionHorizons"),
     evidenceFusionContent: document.getElementById("evidenceFusionContent"),
   };
@@ -286,13 +299,185 @@
   }
 
   // ---- News-Lage (separate Einordnung, keine statistische Baseline-Anpassung) -------------
+  function renderNewsLageV2Card(newsLage) {
+    els.currentMarketCard.hidden = false;
+    els.currentMarketToggleWrap.hidden = true;
+    const windowDays = newsLage.windowDays || 30;
+    els.newsLageTitle.innerHTML = `News-Lage &ndash; letzte ${windowDays} Tage <span class="badge badge-category">Separate Einordnung</span>`;
+    els.currentMarketLabel.textContent = "Gespeicherte, validierte Ereignishistorie";
+    els.newsLageScale.hidden = !newsLage.available;
+    els.newsLageMethodology.hidden = false;
+    els.newsLageDetails.hidden = false;
+    els.newsLageEvents.hidden = !newsLage.available;
+    els.eventOutcomesPanel.hidden = !newsLage.available;
+    const scoreClass = (score) => score > 20 ? "bullish" : score < -20 ? "bearish" : "neutral";
+    const scoreColor = (score) => score > 20 ? "#d1495b" : score < -20 ? "#2a9d8f" : "#6b7789";
+    const qualitativeLabel = (label) => ({
+      "stark bearish": "Stark bearish",
+      bearish: "Bearish",
+      "neutral/ausgeglichen": "Neutral / ausgeglichen",
+      bullish: "Bullish",
+      "stark bullish": "Stark bullish",
+    })[label] || "Nicht verf\u00fcgbar";
+    const formatScore = (score) => `${score > 0 ? "+" : ""}${Math.round(score)}`;
+    const formatLastUpdated = (value) => {
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? "\u2014" : fmtDateTime(date);
+    };
+    const marketCard = (label, result) => {
+      if (!newsLage.available || result.sentimentScore === null) {
+        return `<div class="news-lage-market news-lage-unavailable"><strong>${label}</strong><span>Nicht verf\u00fcgbar</span></div>`;
+      }
+      return `<div class="news-lage-market">
+        <span class="news-lage-market-name">${label}</span>
+        <strong class="news-lage-score ${scoreClass(result.sentimentScore)}" title="Sentiment Score auf einer Skala von -100 bis +100">${formatScore(result.sentimentScore)}</strong>
+        <span class="badge badge-${scoreClass(result.sentimentScore)}">${qualitativeLabel(result.qualitativeLabel)}</span>
+        <span class="news-lage-meta">${result.totalEventCount} gespeicherte Ereignisse &middot; ${result.directionalEventCount} mit validierter Richtung</span>
+        <span class="news-lage-meta">Letzte Aktualisierung: ${formatLastUpdated(result.lastUpdatedAt)}</span>
+      </div>`;
+    };
+    const china = newsLage.china;
+    const eu = newsLage.eu;
+    els.currentMarketDot.style.background = newsLage.available ? scoreColor((china.sentimentScore || 0) + (eu.sentimentScore || 0)) : "#6b7789";
+    const markets = state.region === "china" ? [["China", china]]
+      : state.region === "eu" ? [["EU", eu]]
+      : [["China", china], ["EU", eu]];
+    els.currentMarketChanges.innerHTML = markets.map(([label, result]) => marketCard(label, result)).join("");
+    const escapeHtml = (value) => String(value ?? "").replace(/[&<>'"]/g, (character) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
+    })[character]);
+    const formatDate = (value) => {
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? "\u2014" : date.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" });
+    };
+    const directionLabel = (direction) => ({ bullish: "bullish", bearish: "bearish", neutral: "neutral" })[direction] || "neutral";
+    const eventRow = (event, market) => {
+      const direction = directionLabel(event.direction);
+      const relevance = market === "china" ? event.chinaRelevance : event.euRelevance;
+      const relevanceText = market === "both"
+        ? `China-Relevanz ${Math.round((event.chinaRelevance || 0) * 100)}% &middot; EU-Relevanz ${Math.round((event.euRelevance || 0) * 100)}%`
+        : `${market === "china" ? "China" : "EU"}-Relevanz ${Math.round((relevance || 0) * 100)}%`;
+      const sources = event.sources?.length ? event.sources.join(", ") : "Quelle nicht angegeben";
+      return `<article class="news-lage-event">
+        <div class="news-lage-event-head"><time>${formatDate(event.publishedAt || event.firstSeenAt)}</time><span class="badge badge-${direction}" title="Deterministisches Ereignisgewicht: ${Number(event.finalWeight || 0).toFixed(3)}">${direction}</span></div>
+        <strong>${escapeHtml(event.title)}</strong>
+        <p>${escapeHtml(sources)} (${event.sourceCount || 0} Quelle${event.sourceCount === 1 ? "" : "n"})</p>
+        <p class="news-lage-event-meta">${escapeHtml(event.category)} &middot; ${escapeHtml(event.eventStage)} / ${escapeHtml(event.evidenceMaturity)} &middot; Schwere ${Math.round((event.severity || 0) * 100)}% &middot; Konfidenz ${Math.round((event.confidence || 0) * 100)}% &middot; ${relevanceText}</p>
+      </article>`;
+    };
+    const combinedEvents = [...(newsLage.events?.china || []), ...(newsLage.events?.eu || [])]
+      .reduce((byEventId, event) => {
+        const existing = byEventId.get(event.eventId);
+        if (!existing || Math.abs(event.finalWeight) > Math.abs(existing.finalWeight)) byEventId.set(event.eventId, event);
+        return byEventId;
+      }, new Map());
+    const eventGroups = state.region === "china" ? [["China", newsLage.events?.china || [], "china"]]
+      : state.region === "eu" ? [["EU", newsLage.events?.eu || [], "eu"]]
+      : [["China & EU", [...combinedEvents.values()].sort((left, right) => Math.abs(right.finalWeight) - Math.abs(left.finalWeight)), "both"]];
+    els.newsLageEventsContent.innerHTML = eventGroups.map(([label, events, market]) => `
+      <section class="news-lage-event-group"><h3>${label}</h3>${events.length
+        ? events.map((event) => eventRow(event, market)).join("")
+        : "<p class=\"news-lage-events-empty\">Keine relevanten gespeicherten Ereignisse im Zeitfenster.</p>"}</section>
+    `).join("");
+
+    // Separate, collapsed event-study display. It reads stored associations
+    // only and never changes forecast or sentiment values.
+    const outcomeEntries = [];
+    const addOutcomeEntries = (events, market, marketLabel) => events.forEach((event) => {
+      outcomeEntries.push({ key: `${market}:${event.eventId}`, event, market, marketLabel });
+    });
+    if (state.region === "china") addOutcomeEntries(newsLage.events?.china || [], "china", "China");
+    else if (state.region === "eu") addOutcomeEntries(newsLage.events?.eu || [], "eu", "EU");
+    else {
+      addOutcomeEntries(newsLage.events?.china || [], "china", "China");
+      addOutcomeEntries(newsLage.events?.eu || [], "eu", "EU");
+    }
+    if (!outcomeEntries.some((entry) => entry.key === state.selectedOutcomeEventKey)) {
+      state.selectedOutcomeEventKey = outcomeEntries[0]?.key || null;
+    }
+    const selectedOutcomeEntry = outcomeEntries.find((entry) => entry.key === state.selectedOutcomeEventKey);
+    const formatPrice = (value, unit) => Number.isFinite(value)
+      ? `${new Intl.NumberFormat("de-DE", { maximumFractionDigits: 2 }).format(value)} ${escapeHtml(unit || "")}`.trim()
+      : "Nicht verf\u00fcgbar";
+    const formatReturn = (value) => Number.isFinite(value)
+      ? `${value > 0 ? "+" : ""}${new Intl.NumberFormat("de-DE", { maximumFractionDigits: 1 }).format(value)}%`
+      : "Nicht verf\u00fcgbar";
+    const outcomeCell = (byHorizon, horizonWeeks) => {
+      const outcome = byHorizon.get(horizonWeeks);
+      if (outcome?.status === "pending") {
+        return `<div class="event-outcome-horizon"><strong>${horizonWeeks}W</strong><span class="event-outcome-pending">Ausstehend</span></div>`;
+      }
+      if (outcome?.status !== "available" || !Number.isFinite(outcome.futurePrice) || !Number.isFinite(outcome.returnPct)) {
+        return `<div class="event-outcome-horizon"><strong>${horizonWeeks}W</strong><span>Nicht verf\u00fcgbar</span></div>`;
+      }
+      return `<div class="event-outcome-horizon"><strong>${horizonWeeks}W</strong><span>${formatPrice(outcome.futurePrice, outcome.unit)}</span><small class="${outcome.returnPct > 0 ? "change-up" : outcome.returnPct < 0 ? "change-down" : "change-flat"}">${formatReturn(outcome.returnPct)}</small></div>`;
+    };
+    if (!selectedOutcomeEntry) {
+      els.eventOutcomesContent.innerHTML = "<p class=\"news-lage-events-empty\">Keine gespeicherten Ereignisse f\u00fcr den gew\u00e4hlten Markt.</p>";
+    } else {
+      const outcomes = Array.isArray(selectedOutcomeEntry.event.priceOutcomes) ? selectedOutcomeEntry.event.priceOutcomes : [];
+      const byHorizon = new Map(outcomes.map((outcome) => [outcome.horizonWeeks, outcome]));
+      const priceAtEvent = outcomes.find((outcome) => Number.isFinite(outcome.priceAtEvent));
+      const direction = directionLabel(selectedOutcomeEntry.event.direction);
+      els.eventOutcomesContent.innerHTML = `
+        <label class="event-outcome-selector">Ereignis
+          <select id="eventOutcomeSelect">${outcomeEntries.map((entry) => `<option value="${escapeHtml(entry.key)}"${entry.key === selectedOutcomeEntry.key ? " selected" : ""}>${escapeHtml(entry.event.title)} (${entry.marketLabel})</option>`).join("")}</select>
+        </label>
+        <article class="event-outcome-record">
+          <div class="event-outcome-record-head"><time>${formatDate(selectedOutcomeEntry.event.publishedAt || selectedOutcomeEntry.event.firstSeenAt)}</time><span class="badge badge-${direction}">${direction}</span></div>
+          <strong>${escapeHtml(selectedOutcomeEntry.event.title)}</strong>
+          <p>${escapeHtml(selectedOutcomeEntry.event.category)} &middot; ${selectedOutcomeEntry.marketLabel} &middot; Preis zum Ereignis: ${formatPrice(priceAtEvent?.priceAtEvent, priceAtEvent?.unit)}</p>
+          <div class="event-outcome-horizons">${[1, 4, 12, 26].map((horizonWeeks) => outcomeCell(byHorizon, horizonWeeks)).join("")}</div>
+        </article>`;
+      document.getElementById("eventOutcomeSelect")?.addEventListener("change", (event) => {
+        state.selectedOutcomeEventKey = event.target.value;
+        renderNewsLageV2Card(newsLage);
+      });
+    }
+    els.currentMarketSummary.textContent = newsLage.available
+      ? `30-Tage-Einordnung f\u00fcr ${state.region === "both" ? "China und EU" : state.region === "china" ? "China" : "die EU"}.`
+      : "News-Lage aus der lokalen Ereignishistorie ist derzeit nicht verf\u00fcgbar. Die statistische Basisprognose bleibt unver\u00e4ndert.";
+  }
+
   function renderCurrentMarketCard() {
+    const newsLage = D.NEWS_LAGE;
+    if (newsLage) {
+      return renderNewsLageV2Card(newsLage);
+      els.currentMarketCard.hidden = false;
+      els.currentMarketToggleWrap.hidden = true;
+      els.currentMarketLabel.textContent = `${newsLage.windowDays || 30}-Tage-Ereignishistorie`;
+      const scoreClass = (score) => score > 20 ? "bullish" : score < -20 ? "bearish" : "neutral";
+      const scoreColor = (score) => score > 20 ? "#d1495b" : score < -20 ? "#2a9d8f" : "#6b7789";
+      const marketLine = (label, result) => {
+        if (!newsLage.available || result.sentimentScore === null) {
+          return `<span title="${label}">${label}: nicht verfÃ¼gbar</span>`;
+        }
+        return `<span title="${label}">${label}: ${result.sentimentScore.toFixed(1)} <span class="badge badge-${scoreClass(result.sentimentScore)}">${result.qualitativeLabel}</span></span>`;
+      };
+      const china = newsLage.china;
+      const eu = newsLage.eu;
+      els.currentMarketDot.style.background = newsLage.available ? scoreColor((china.sentimentScore || 0) + (eu.sentimentScore || 0)) : "#6b7789";
+      els.currentMarketChanges.innerHTML = `${marketLine("CN", china)}${marketLine("EU", eu)}`;
+      els.currentMarketSummary.textContent = newsLage.available
+        ? `Deterministische Einordnung aus validierten, gespeicherten Ereignissen der letzten ${newsLage.windowDays} Tage: China ${china.directionalEventCount} gerichtete Ereignisse, EU ${eu.directionalEventCount} gerichtete Ereignisse. Keine Anpassung der statistischen Basisprognose.`
+        : "News-Lage aus der lokalen Ereignishistorie ist derzeit nicht verfÃ¼gbar. Die statistische Basisprognose bleibt unverÃ¤ndert.";
+      return;
+    }
+
     const sc = D.SCENARIOS.find((s) => s.id === "currentMarket");
     if (!sc) {
       els.currentMarketCard.hidden = true;
       return;
     }
     els.currentMarketCard.hidden = false;
+    els.currentMarketToggleWrap.hidden = false;
+    els.newsLageTitle.innerHTML = "News-Lage <span class=\"badge badge-category\">Separate Einordnung</span>";
+    els.newsLageScale.hidden = true;
+    els.newsLageMethodology.hidden = true;
+    els.newsLageDetails.hidden = true;
+    els.newsLageEvents.hidden = true;
+    els.eventOutcomesPanel.hidden = true;
+    els.currentMarketLabel.textContent = "Separates 12M-News-Szenario";
 
     const available = !!(sc.metadata && sc.metadata.available);
     els.currentMarketDot.style.background = sc.color;
@@ -317,6 +502,17 @@
         renderChart();
       });
     }
+  }
+
+  // ---- Historische Ereignisassoziationen (read-only, keine Forecast- oder Sentiment-Logik) -----
+  function renderHistoricalAssociations() {
+    const report = D.HISTORICAL_EVENT_ASSOCIATIONS;
+    els.historicalAssociationCard.hidden = !report;
+    if (!report) return;
+    els.historicalAssociationContent.innerHTML = window.HistoricalAssociationPanel.render({
+      report,
+      region: state.region,
+    });
   }
 
   // ---- Evidenz-Check (rein erklärend; verwendet ausschließlich API-Fusionsergebnisse) -----
@@ -396,6 +592,8 @@
         btn.classList.add("active");
         updateUnitDisplay();
         renderChart();
+        renderCurrentMarketCard();
+        renderHistoricalAssociations();
         renderEvidenceFusion();
       });
     });
@@ -453,6 +651,8 @@
         LAST_EU: json.history.eu[json.history.eu.length - 1],
         SCENARIOS: json.scenarios,
         NEWS: json.news,
+        NEWS_LAGE: json.newsLage || null,
+        HISTORICAL_EVENT_ASSOCIATIONS: json.historicalEventAssociations || null,
         BASELINE: json.baseline || null,
         EVIDENCE_FUSION: json.evidenceFusion || null,
       };
@@ -462,6 +662,7 @@
 
       renderScenarioToggles();
       renderCurrentMarketCard();
+      renderHistoricalAssociations();
       renderEvidenceFusion();
       renderChart();
       renderInsights();
@@ -493,6 +694,7 @@
     updateUnitDisplay();
     wireEvidenceFusionHorizons();
     renderScenarioToggles();
+    renderHistoricalAssociations();
     renderEvidenceFusion();
     renderChart();
     renderInsights();

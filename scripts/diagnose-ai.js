@@ -7,6 +7,7 @@ const fs = require("fs");
 const path = require("path");
 try { require("dotenv").config({ path: path.join(__dirname, "..", ".env") }); } catch { /* dependencies may not be installed yet */ }
 const { GoogleNewsSource, DirectFeedSource, mergeArticles } = require("../lib/newsSources");
+const { createNewsTransport } = require("../lib/newsTransport");
 const { filterArticlesByRelevance } = require("../lib/newsRelevance");
 const { classifySequentialBatches, OllamaProvider, selectArticlesForClassification } = require("../lib/newsClassifierProviders");
 const { validateNewsClassification } = require("../lib/newsClassificationValidation");
@@ -24,11 +25,17 @@ const { batchSize, timeoutMs } = getOllamaRuntimeConfig();
 const proxyUrl = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy || "";
 const { fetch: fetchImpl, ProxyAgent } = require("undici");
 const newsDispatcher = proxyUrl ? new ProxyAgent(proxyUrl) : undefined;
+const newsTransport = createNewsTransport({ fetch: fetchImpl, dispatcher: newsDispatcher });
+const newsDependencies = { fetch: newsTransport.fetch, transportFor: newsTransport.transportFor };
 
-function instantiate(entry) {
-  if (entry.kind === "google-news") return new GoogleNewsSource({ fetch: fetchImpl, dispatcher: newsDispatcher, enabled: entry.enabled !== false });
-  if (entry.kind === "rss" || entry.kind === "atom") return new DirectFeedSource(entry, { fetch: fetchImpl, dispatcher: newsDispatcher });
+function instantiate(entry, dependencies = newsDependencies) {
+  if (entry.kind === "google-news") return new GoogleNewsSource({ ...dependencies, enabled: entry.enabled !== false });
+  if (entry.kind === "rss" || entry.kind === "atom") return new DirectFeedSource(entry, dependencies);
   return null;
+}
+
+function createConfiguredDiagnosticSources(sourceConfig, dependencies = newsDependencies) {
+  return sourceConfig.sources.filter((entry) => entry.enabled !== false).map((entry) => instantiate(entry, dependencies)).filter(Boolean);
 }
 
 function toNewsItem(article, index) {
@@ -74,7 +81,7 @@ function classifiedView(article, raw) {
 }
 
 async function main() {
-  const sources = config.sources.filter((entry) => entry.enabled !== false).map(instantiate).filter(Boolean);
+  const sources = createConfiguredDiagnosticSources(config);
   const results = await Promise.all(sources.map((source) => source.fetch({ timeoutMs: 15000, limit: 50 })));
   const merged = mergeArticles(results, 200);
   const filtered = filterArticlesByRelevance(merged);
@@ -160,7 +167,11 @@ async function main() {
   }, null, 2));
 }
 
-main().catch((error) => {
-  console.error("AI diagnostic failed:", error?.message || "request failed");
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error("AI diagnostic failed:", error?.message || "request failed");
+    process.exitCode = 1;
+  });
+}
+
+module.exports = { createConfiguredDiagnosticSources };

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import sys
+import time
 from pathlib import Path
 
 # Erlaubt den Direktaufruf "python forecasting/pipeline.py" (z.B. aus server.js per execFile),
@@ -30,6 +31,7 @@ import numpy as np
 from statsforecast import StatsForecast
 
 from forecasting.backtest import MARKET_COLUMNS, MAX_HORIZON, run_all_backtests, run_cross_validation
+from forecasting.backtest_cache import get_cached_backtests
 from forecasting.load_data import load_weekly_market_data
 from forecasting.models import DEFAULT_SEASON_LENGTH, default_models, to_statsforecast_frame
 
@@ -40,6 +42,12 @@ FORECAST_HORIZON_WEEKS = 52
 INTERVAL_LEVEL = 80
 HISTORY_MONTHS = 24
 FORECAST_MONTHS = 12
+
+
+def _log_timing(stage: str, started_at: float, **fields: object) -> None:
+    details = " ".join(f"{key}={value}" for key, value in fields.items())
+    suffix = f" {details}" if details else ""
+    logger.info("FORECAST_TIMING stage=%s duration_ms=%d%s", stage, round((time.perf_counter() - started_at) * 1000), suffix)
 
 
 def _prepare_market_series(weekly_df: pd.DataFrame, value_col: str) -> pd.DataFrame:
@@ -56,7 +64,13 @@ def _select_model_instance(model_name: str):
     raise ValueError(f"Modell '{model_name}' ist nicht in default_models() enthalten.")
 
 
-def _forecast_weekly(series: pd.DataFrame, unique_id: str, model_name: str, transformation: str) -> pd.DataFrame:
+def _forecast_weekly(
+    series: pd.DataFrame,
+    unique_id: str,
+    model_name: str,
+    transformation: str,
+    interval_errors: dict[str, list[float]] | None = None,
+) -> pd.DataFrame:
     """Punktprognose plus positive, multiplikative OOS-Fehlerintervalle."""
     transformed = series.copy()
     if transformation == "log":
@@ -70,13 +84,18 @@ def _forecast_weekly(series: pd.DataFrame, unique_id: str, model_name: str, tran
     if transformation == "log":
         p50 = np.exp(p50)
 
-    cv = run_cross_validation(series, unique_id, models=[model], transformation=transformation)
-    cv["lead"] = ((cv["ds"] - cv["cutoff"]).dt.days // 7).clip(upper=MAX_HORIZON)
-    cv["error"] = np.log(cv["y"] / cv[model_name])
-    fallback = cv[cv["lead"] == MAX_HORIZON]["error"].to_numpy()
+    if interval_errors is None:
+        cv = run_cross_validation(series, unique_id, models=[model], transformation=transformation)
+        cv["lead"] = ((cv["ds"] - cv["cutoff"]).dt.days // 7).clip(upper=MAX_HORIZON)
+        cv["error"] = np.log(cv["y"] / cv[model_name])
+        interval_errors = {
+            str(lead): cv[cv["lead"] == lead]["error"].to_list()
+            for lead in range(1, MAX_HORIZON + 1)
+        }
+    fallback = np.asarray(interval_errors.get(str(MAX_HORIZON), []), dtype=float)
     lo, hi = [], []
     for lead, point in enumerate(p50, start=1):
-        errors = cv[cv["lead"] == min(lead, MAX_HORIZON)]["error"].to_numpy()
+        errors = np.asarray(interval_errors.get(str(min(lead, MAX_HORIZON)), []), dtype=float)
         errors = errors if errors.size else fallback
         errors = np.append(errors, 0.0)
         # Include the no-error outcome as an admissible central forecast: the
@@ -232,7 +251,9 @@ def build_baseline_forecast(weekly_df: pd.DataFrame | None = None) -> dict:
                 nach dem für beide Märkte gemeinsamen letzten realen Beobachtungsmonat.
     """
     weekly_df = load_weekly_market_data() if weekly_df is None else weekly_df
-    backtest_results = run_all_backtests()
+    backtest_started_at = time.perf_counter()
+    backtest_results, backtest_cache_hit = get_cached_backtests(weekly_df, run_all_backtests)
+    _log_timing("model_selection", backtest_started_at, cache="hit" if backtest_cache_hit else "miss")
 
     series_by_market = {m: _prepare_market_series(weekly_df, col) for m, col in MARKET_COLUMNS.items()}
     # Gemeinsamer Referenzmonat (der spätere der beiden letzten realen Beobachtungsmonate),
@@ -249,7 +270,15 @@ def build_baseline_forecast(weekly_df: pd.DataFrame | None = None) -> dict:
             market, selected_model, FORECAST_HORIZON_WEEKS, INTERVAL_LEVEL,
         )
 
-        weekly_forecast = _forecast_weekly(series, unique_id=market, model_name=selected_model, transformation=transformation)
+        forecast_started_at = time.perf_counter()
+        weekly_forecast = _forecast_weekly(
+            series,
+            unique_id=market,
+            model_name=selected_model,
+            transformation=transformation,
+            interval_errors=backtest_results[market]["interval_errors"],
+        )
+        _log_timing("final_forecast", forecast_started_at, market=market, model=selected_model)
         monthly_forecast = _monthly_forecast_frame(weekly_forecast, reference_month, FORECAST_MONTHS)
         last_row = series.iloc[-1]
 
@@ -257,7 +286,7 @@ def build_baseline_forecast(weekly_df: pd.DataFrame | None = None) -> dict:
             "selected_model": selected_model,
             "transformation": transformation,
             "reliability": _assess_reliability(backtest_results[market], float(last_row["price"]), series),
-            "backtest": backtest_results[market],
+            "backtest": {key: value for key, value in backtest_results[market].items() if key != "interval_errors"},
             "last_observed": {
                 "week": last_row["week"].strftime("%Y-%m-%d"),
                 "price": round(float(last_row["price"]), 2),
@@ -300,7 +329,10 @@ def build_frontend_payload() -> dict:
           "china": {...}
         }
     """
+    total_started_at = time.perf_counter()
+    data_started_at = time.perf_counter()
     weekly_df = load_weekly_market_data()
+    _log_timing("excel_read_and_normalization", data_started_at)
     baseline = build_baseline_forecast(weekly_df=weekly_df)
 
     series_by_market = {m: _prepare_market_series(weekly_df, col) for m, col in MARKET_COLUMNS.items()}
@@ -348,7 +380,10 @@ def build_frontend_payload() -> dict:
             ),
         }
 
+    scenarios_started_at = time.perf_counter()
     payload["scenarios"] = build_frontend_scenarios(weekly_df, baseline, payload)
+    _log_timing("scenario_generation", scenarios_started_at)
+    _log_timing("total_runtime", total_started_at)
     return payload
 
 

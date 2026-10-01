@@ -38,12 +38,17 @@ const express = require("express");
 const { fetch, ProxyAgent } = require("undici");
 const { aggregateMarketState } = require("./lib/newsSignals");
 const { fetchConfiguredNewsSources } = require("./lib/newsSources");
+const { createNewsTransport } = require("./lib/newsTransport");
 const { filterArticlesByRelevance } = require("./lib/newsRelevance");
 const { classifySequentialBatches, createNewsClassifierProvider, selectArticlesForClassification } = require("./lib/newsClassifierProviders");
 const { validateNewsClassification } = require("./lib/newsClassificationValidation");
 const { normalizeCausalClassification, normalizeGlobalRelevance } = require("./lib/newsCausality");
 const { deduplicateEvents } = require("./lib/newsEventDedup");
 const { buildEventEvidence } = require("./lib/newsEventEvidence");
+const { persistValidatedEvents } = require("./lib/newsEventPersistence");
+const { loadNewsLageV2 } = require("./lib/newsLageV2");
+const { loadHistoricalEventOutcomeAssociations } = require("./lib/eventOutcomeAggregation");
+const { refreshPendingEventOutcomes } = require("./lib/eventOutcomePendingRefresh");
 const { NewsClassificationCache } = require("./lib/newsClassificationCache");
 const { buildEvidenceFusionDiagnostics } = require("./lib/evidenceFusionIntegration");
 const { resolvePythonInterpreter } = require("./lib/pythonResolver");
@@ -73,6 +78,7 @@ const CLASSIFICATION_SCHEMA_VERSION = "causal-v3";
 // Firmenproxy: Node's fetch nutzt HTTP_PROXY/HTTPS_PROXY NICHT automatisch, daher explizit über undici ProxyAgent.
 const PROXY_URL = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy || "";
 const proxyDispatcher = PROXY_URL ? new ProxyAgent(PROXY_URL) : undefined;
+const newsTransport = createNewsTransport({ fetch, dispatcher: proxyDispatcher });
 const NEWS_SOURCES_CONFIG = JSON.parse(fs.readFileSync(path.join(appDir, "config", "news-sources.json"), "utf8"));
 const newsClassifier = createNewsClassifierProvider({
   providerId: LLM_PROVIDER,
@@ -194,7 +200,7 @@ function toIsoDate(pubDate) {
 async function fetchRealNews(limit) {
   const { articles, health } = await fetchConfiguredNewsSources(
     NEWS_SOURCES_CONFIG,
-    { fetch, dispatcher: proxyDispatcher },
+    { fetch: newsTransport.fetch, transportFor: newsTransport.transportFor },
     { limit }
   );
   const { accepted: relevant, rejected } = filterArticlesByRelevance(articles);
@@ -500,6 +506,25 @@ app.post("/api/refresh", async (req, res) => {
     const classifiedEvidence = news.filter((n) => n.classificationStatus === "classified");
     const eventDeduplication = deduplicateEvents(classifiedEvidence);
     const eventEvidence = buildEventEvidence(eventDeduplication.representatives);
+    persistValidatedEvents(eventEvidence, eventDeduplication.representatives, {
+      databasePath: path.join(appDir, "data", "news-events.db"),
+    });
+    // Pending-only maintenance: it skips price loading when no pending rows
+    // exist and isolates all failures from the forecast/news response.
+    await refreshPendingEventOutcomes({
+      databasePath: path.join(appDir, "data", "news-events.db"),
+    });
+    // News-Lage v2 is a read-only description of persisted, validated events
+    // across its own 30-day history. Its failure is intentionally isolated from
+    // forecasting, Fusion, stress scenarios, and the legacy currentMarket API.
+    const newsLage = loadNewsLageV2({
+      databasePath: path.join(appDir, "data", "news-events.db"),
+    });
+    // Separate, additive historical-event study. It reads only persisted
+    // completed outcomes and never informs forecast, News-Lage, Fusion, or scenarios.
+    const historicalEventAssociations = loadHistoricalEventOutcomeAssociations({
+      databasePath: path.join(appDir, "data", "news-events.db"),
+    });
     newsDiagnostics.eventRepresentativeCount = eventDeduplication.representatives.length;
     newsDiagnostics.duplicateArticleCount = classifiedEvidence.length - eventDeduplication.representatives.length;
 
@@ -575,6 +600,8 @@ app.post("/api/refresh", async (req, res) => {
       scenarios,
       news,
       eventEvidence,
+      newsLage,
+      historicalEventAssociations,
       evidenceFusion,
       newsDiagnostics,
       marketState,

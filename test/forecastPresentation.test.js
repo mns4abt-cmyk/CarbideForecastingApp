@@ -33,16 +33,38 @@ test("frontend copy identifies historical stress calibration and separate news i
   const index = fs.readFileSync(path.join(__dirname, "..", "public", "index.html"), "utf8");
   assert.match(index, /News-Lage/);
   assert.match(index, /Separate Einordnung/);
-  assert.match(index, /keine Anpassung der statistischen Baseline/);
+  assert.match(index, /statistischen Preisforecast nicht/);
   assert.match(index, /Historisch kalibrierte Stressszenarien relativ zur statistischen Baseline/);
   assert.doesNotMatch(index, /News-adjustiert/);
 });
 
-test("footer and News-Lage copy are provider-neutral and identify the separate news scenario", () => {
+test("footer and News-Lage copy are provider-neutral and retain a v2 history path", () => {
   const index = fs.readFileSync(path.join(__dirname, "..", "public", "index.html"), "utf8");
+  const app = fs.readFileSync(path.join(__dirname, "..", "public", "js", "app.js"), "utf8");
   assert.match(index, /Stimmen des Marktes/);
-  assert.match(index, /Separates 12M-News-Szenario/);
-  assert.match(index, /News-Szenario im Chart anzeigen/);
+  assert.match(index, /News-Lage &ndash; letzte 30 Tage/);
+  assert.match(index, /Der Sentiment Score wird deterministisch aus validierten Nachrichtenereignissen der letzten 30 Tage berechnet/);
+  assert.match(index, /Ereignisse der letzten 30 Tage/);
+  assert.match(index, /Ereignis- und Preisverlauf/);
+  assert.match(index, /zeitliche Zusammenh&auml;nge nach einem Ereignis und keine nachgewiesene Kausalit&auml;t/);
+  assert.match(index, /Historische Ereignisassoziationen/);
+  assert.match(index, /historische nachfolgende Preisbewegungen und keine nachgewiesene kausale Wirkung/);
+  assert.match(index, /-100[\s\S]*0[\s\S]*\+100/);
+  assert.match(app, /NEWS_LAGE: json\.newsLage \|\| null/);
+  assert.match(app, /function renderNewsLageV2Card/);
+  assert.match(app, /gespeicherte Ereignisse/);
+  assert.match(app, /mit validierter Richtung/);
+  assert.match(app, /newsLageEventsContent/);
+  assert.match(app, /eventOutcomesPanel/);
+  assert.match(app, /Preis zum Ereignis/);
+  assert.match(app, /Ausstehend/);
+  assert.match(app, /Nicht verf\\u00fcgbar/);
+  assert.match(app, /priceOutcomes/);
+  assert.match(app, /HISTORICAL_EVENT_ASSOCIATIONS: json\.historicalEventAssociations \|\| null/);
+  assert.match(app, /renderHistoricalAssociations/);
+  assert.match(app, /Deterministisches Ereignisgewicht/);
+  assert.match(app, /renderCurrentMarketCard\(\);/);
+  assert.match(app, /currentMarketToggleWrap\.hidden = true/);
   assert.doesNotMatch(index, /Bosch Model Farm/);
   assert.doesNotMatch(index, /Google News/);
 });

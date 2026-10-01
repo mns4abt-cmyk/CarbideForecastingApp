@@ -6,6 +6,7 @@
 const fs = require("fs");
 const path = require("path");
 const { GoogleNewsSource, DirectFeedSource, mergeArticles } = require("../lib/newsSources");
+const { createNewsTransport } = require("../lib/newsTransport");
 const { filterArticlesByRelevance } = require("../lib/newsRelevance");
 
 const appDir = path.join(__dirname, "..");
@@ -22,7 +23,8 @@ try {
 } catch {
   if (proxyUrl) console.error("undici is not installed; diagnostic is running without explicit proxy support.");
 }
-const dependencies = { fetch: fetchImpl, dispatcher };
+const newsTransport = createNewsTransport({ fetch: fetchImpl, dispatcher });
+const dependencies = { fetch: newsTransport.fetch, transportFor: newsTransport.transportFor };
 
 function instantiate(entry) {
   if (entry.kind === "google-news") return new GoogleNewsSource({ ...dependencies, enabled: entry.enabled !== false });
@@ -61,6 +63,9 @@ async function main() {
       error: result.health.error,
       relevantCount: filtered.accepted.length,
       rejectedCount: filtered.rejected.length,
+      proxyConfigured: result.health.proxyConfigured,
+      proxyAuthMode: result.health.proxyAuthMode,
+      transport: result.health.transport,
       queryDiagnostics: result.queryDiagnostics || undefined,
     };
   });

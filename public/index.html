@@ -53,17 +53,42 @@
 
       <div class="card current-market-card" id="currentMarketCard" hidden>
         <div class="card-header">
-          <h2>News-Lage <span class="badge badge-category">Separate Einordnung</span></h2>
+          <h2 id="newsLageTitle">News-Lage &ndash; letzte 30 Tage <span class="badge badge-category">Separate Einordnung</span></h2>
           <label class="scenario-chip" id="currentMarketToggleWrap">
             <input type="checkbox" id="currentMarketToggle" />
             <span class="dot" id="currentMarketDot"></span>
             News-Szenario im Chart anzeigen
           </label>
         </div>
-        <p class="current-market-scenario-label">Separates 12M-News-Szenario</p>
+        <p class="current-market-scenario-label" id="currentMarketLabel">Separates 12M-News-Szenario</p>
         <div class="insight-changes" id="currentMarketChanges"></div>
+        <div class="news-lage-scale" id="newsLageScale" hidden aria-label="Sentiment-Skala von minus 100 bis plus 100">
+          <div><span>-100</span><span>0</span><span>+100</span></div>
+          <div><span>bearish</span><span>neutral</span><span>bullish</span></div>
+        </div>
         <p class="insight-text" id="currentMarketSummary"></p>
-        <p class="current-market-note">Separate Nachrichten-Einordnung; keine Anpassung der statistischen Baseline.</p>
+        <p class="current-market-note" id="newsLageMethodology" hidden>Der Sentiment Score wird deterministisch aus validierten Nachrichtenereignissen der letzten 30 Tage berechnet. Neuere und materiellere Ereignisse erhalten ein h&ouml;heres Gewicht. Der Score ver&auml;ndert den statistischen Preisforecast nicht.</p>
+        <details class="news-lage-details" id="newsLageDetails" hidden>
+          <summary>Methodik anzeigen</summary>
+          <p>Ber&uuml;cksichtigt werden validierte, deduplizierte Ereignisse mit Marktbezug. Richtung, Reifegrad, Relevanz und Aktualit&auml;t werden deterministisch gewichtet.</p>
+        </details>
+        <details class="news-lage-events" id="newsLageEvents" hidden>
+          <summary>Ereignisse der letzten 30 Tage</summary>
+          <div id="newsLageEventsContent"></div>
+        </details>
+        <details class="event-outcomes-panel" id="eventOutcomesPanel" hidden>
+          <summary>Ereignis- und Preisverlauf</summary>
+          <div id="eventOutcomesContent"></div>
+          <p class="event-outcomes-note">Die dargestellten Preisbewegungen zeigen zeitliche Zusammenh&auml;nge nach einem Ereignis und keine nachgewiesene Kausalit&auml;t.</p>
+        </details>
+      </div>
+
+      <div class="card historical-association-card" id="historicalAssociationCard" hidden>
+        <details class="historical-association-details">
+          <summary>Historische Ereignisassoziationen</summary>
+          <div id="historicalAssociationContent"></div>
+          <p class="historical-association-note">Die dargestellten Werte beschreiben historische nachfolgende Preisbewegungen und keine nachgewiesene kausale Wirkung. Sie ver&auml;ndern weder den statistischen Forecast noch die News-Lage.</p>
+        </details>
       </div>
 
       <div class="card evidence-fusion-card" id="evidenceFusionCard">
@@ -108,6 +133,7 @@
 <script src="js/data.js"></script>
 <script src="js/chart.js"></script>
 <script src="js/evidenceFusionPanel.js"></script>
+<script src="js/historicalAssociationPanel.js"></script>
 <script src="js/forecastPresentation.js"></script>
 <script src="js/aiStatus.js"></script>
 <script src="js/app.js"></script>

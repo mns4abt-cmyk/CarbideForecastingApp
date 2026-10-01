@@ -19,6 +19,7 @@ Werten aufgefüllt, sondern bleiben als NaN stehen.
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -208,8 +209,14 @@ def load_weekly_market_data() -> pd.DataFrame:
         DataFrame mit Spalten ["week", "eu_usd_mtu", "china_cny_kg"], eine Zeile
         je Kalenderwoche (Wochenende Freitag), aufsteigend sortiert.
     """
-    eu_weekly = _to_weekly(load_eu_data(), "EU")
-    china_weekly = _to_weekly(load_china_data(), "China")
+    read_started_at = time.perf_counter()
+    eu_raw = load_eu_data()
+    china_raw = load_china_data()
+    logger.info("FORECAST_TIMING stage=excel_read duration_ms=%d", round((time.perf_counter() - read_started_at) * 1000))
+    normalization_started_at = time.perf_counter()
+    eu_weekly = _to_weekly(eu_raw, "EU")
+    china_weekly = _to_weekly(china_raw, "China")
+    logger.info("FORECAST_TIMING stage=normalization duration_ms=%d", round((time.perf_counter() - normalization_started_at) * 1000))
     return _build_combined(eu_weekly, china_weekly)
 
 

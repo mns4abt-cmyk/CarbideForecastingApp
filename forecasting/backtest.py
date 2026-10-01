@@ -16,6 +16,7 @@ der geprüften Horizonte hinweg tatsächlich schlägt (siehe `select_model()`).
 from __future__ import annotations
 
 import logging
+import time
 
 import numpy as np
 import pandas as pd
@@ -171,6 +172,21 @@ def compute_metrics(
     return metrics
 
 
+def interval_error_samples(cv_df: pd.DataFrame, model_name: str) -> dict[str, list[float]]:
+    """Return the selected model's existing CV residuals for forecast intervals.
+
+    These are the same walk-forward observations already used during model
+    selection; retaining them avoids a second identical cross-validation solely
+    for interval construction.
+    """
+    lead = ((cv_df["ds"] - cv_df["cutoff"]).dt.days // 7).clip(upper=MAX_HORIZON)
+    errors = np.log(cv_df["y"] / cv_df[model_name])
+    return {
+        str(horizon): [float(value) for value in errors[lead == horizon].to_numpy()]
+        for horizon in range(1, MAX_HORIZON + 1)
+    }
+
+
 def select_model(metrics_by_horizon: dict[int, dict[str, dict]], benchmark: str = "Naive__raw") -> tuple[str, dict]:
     """Wählt ein Modell je Markt anhand konsistenter Überlegenheit ggü. Naive.
 
@@ -235,6 +251,8 @@ def run_market_backtest(market: str, weekly_df: pd.DataFrame) -> dict:
     series = _prepare_market_series(weekly_df, value_col)
     scale_lookup = _naive_scale_lookup(series)
     metrics_by_horizon = {h: {} for h in HORIZONS}
+    cv_by_transformation: dict[str, pd.DataFrame] = {}
+    backtest_started_at = time.perf_counter()
     for transformation in ("raw", "log"):
         models = default_models(season_length=DEFAULT_SEASON_LENGTH)
         # log-Naive is identical to raw Naive after inversion; retain one mandatory benchmark.
@@ -242,12 +260,22 @@ def run_market_backtest(market: str, weekly_df: pd.DataFrame) -> dict:
             models = [model for model in models if model.alias != "Naive"]
         names = [model.alias for model in models]
         cv_df = run_cross_validation(series, unique_id=market, models=models, transformation=transformation)
+        cv_by_transformation[transformation] = cv_df
         for horizon in HORIZONS:
             metrics_by_horizon[horizon].update({
                 f"{name}__{transformation}": values
                 for name, values in compute_metrics(cv_df, scale_lookup, horizon, names).items()
             })
+    logger.info(
+        "FORECAST_TIMING stage=walk_forward_backtest duration_ms=%d market=%s",
+        round((time.perf_counter() - backtest_started_at) * 1000), market,
+    )
+    selection_started_at = time.perf_counter()
     selected_key, summary_metrics = select_model(metrics_by_horizon)
+    logger.info(
+        "FORECAST_TIMING stage=model_selection duration_ms=%d market=%s",
+        round((time.perf_counter() - selection_started_at) * 1000), market,
+    )
     selected_model, transformation = selected_key.split("__", 1)
 
     return {
@@ -257,12 +285,13 @@ def run_market_backtest(market: str, weekly_df: pd.DataFrame) -> dict:
         "benchmark_key": "Naive__raw",
         "metrics": summary_metrics,
         "all_metrics": metrics_by_horizon,
+        "interval_errors": interval_error_samples(cv_by_transformation[transformation], selected_model),
     }
 
 
-def run_all_backtests() -> dict:
+def run_all_backtests(weekly_df: pd.DataFrame | None = None) -> dict:
     """Führt den Backtest für EU und China durch und liefert die Auswahl je Markt."""
-    weekly_df = load_weekly_market_data()
+    weekly_df = load_weekly_market_data() if weekly_df is None else weekly_df
     return {market: run_market_backtest(market, weekly_df) for market in MARKET_COLUMNS}
 
 
