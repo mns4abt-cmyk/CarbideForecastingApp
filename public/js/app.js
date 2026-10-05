@@ -43,6 +43,7 @@
     historicalAssociationContent: document.getElementById("historicalAssociationContent"),
     evidenceFusionHorizons: document.getElementById("evidenceFusionHorizons"),
     evidenceFusionContent: document.getElementById("evidenceFusionContent"),
+    strategicMarketContent: document.getElementById("strategicMarketContent"),
   };
 
   // Von D abgeleitete Werte werden nach jedem Refresh neu berechnet (siehe recomputeDerived).
@@ -505,6 +506,12 @@
   }
 
   // ---- Historische Ereignisassoziationen (read-only, keine Forecast- oder Sentiment-Logik) -----
+  function renderStrategicMarket() {
+    els.strategicMarketContent.innerHTML = window.StrategicMarketPanel.render({
+      report: D.STRATEGIC_MARKET_INTELLIGENCE,
+    });
+  }
+
   function renderHistoricalAssociations() {
     const report = D.HISTORICAL_EVENT_ASSOCIATIONS;
     els.historicalAssociationCard.hidden = !report;
@@ -655,6 +662,7 @@
         HISTORICAL_EVENT_ASSOCIATIONS: json.historicalEventAssociations || null,
         BASELINE: json.baseline || null,
         EVIDENCE_FUSION: json.evidenceFusion || null,
+        STRATEGIC_MARKET_INTELLIGENCE: json.strategicMarketIntelligence || null,
       };
       recomputeDerived();
       setAiPill(AiStatus.pillState(json));
@@ -664,6 +672,7 @@
       renderCurrentMarketCard();
       renderHistoricalAssociations();
       renderEvidenceFusion();
+      renderStrategicMarket();
       renderChart();
       renderInsights();
       renderNews();
@@ -696,6 +705,7 @@
     renderScenarioToggles();
     renderHistoricalAssociations();
     renderEvidenceFusion();
+    renderStrategicMarket();
     renderChart();
     renderInsights();
     renderNews();

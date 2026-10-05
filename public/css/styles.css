@@ -244,6 +244,19 @@ body {
 .evidence-fusion-unavailable { margin: 0; color: var(--text-muted); font-size: 0.82rem; }
 .evidence-fusion-note { margin: 12px 0 0; color: var(--text-muted); font-size: 0.76rem; font-style: italic; }
 
+/* ---------- Strategische Marktbeobachtung (read-only, cross-market) ---------- */
+.strategic-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 12px; align-items: start; }
+.strategic-card { min-width: 0; border: 1px solid var(--border); border-radius: 10px; padding: 14px; overflow-wrap: anywhere; }
+.strategic-card h3 { margin: 0 0 8px; font-size: 0.95rem; }
+.strategic-count { margin: 0 0 5px; font-size: 0.82rem; font-weight: 600; }
+.strategic-note, .strategic-status { color: var(--text-muted); font-size: 0.8rem; line-height: 1.5; }
+.strategic-events { margin: 12px 0; padding-left: 18px; }
+.strategic-events li + li { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
+.strategic-event-title { margin: 0 0 5px; font-size: 0.84rem; line-height: 1.4; font-weight: 600; }
+.strategic-event-meta { margin: 3px 0; color: var(--text-muted); font-size: 0.74rem; line-height: 1.45; }
+.strategic-details summary { cursor: pointer; font-size: 0.79rem; color: var(--text); padding: 6px 0; }
+.strategic-details summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
 /* ---------- Insights ---------- */
 .insights-sub { margin: 0 0 12px; font-size: 0.82rem; color: var(--text-muted); }
 .insights-list { display: flex; flex-direction: column; gap: 10px; }

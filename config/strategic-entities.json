@@ -1,0 +1,29 @@
+{
+  "entities": [
+    {
+      "id": "almonty",
+      "apiKey": "almonty",
+      "displayName": "Almonty",
+      "confirmed": true,
+      "aliases": ["Almonty", "Almonty Industries", "Sangdong"]
+    },
+    {
+      "id": "masan_group",
+      "apiKey": "masan",
+      "displayName": "Masan Group",
+      "confirmed": true,
+      "aliases": ["Masan", "Masan Group", "Masan High-Tech Materials", "Masan High-Tech", "Nui Phao", "Nui Phao Mining"]
+    }
+  ],
+  "chinaTcOperators": [
+    {
+      "id": "jinlu",
+      "apiKey": "jinlu",
+      "displayName": "Jinlu",
+      "confirmed": true,
+      "aliases": ["Jinlu"]
+    }
+  ],
+  "pendingChinaTcOperatorSlots": 2,
+  "confirmationNote": "Two additional China TC operators and their aliases require business confirmation. No identities or ranking are inferred. Add definitions only after confirmation; unconfirmed entries are excluded."
+}

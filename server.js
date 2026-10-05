@@ -47,6 +47,7 @@ const { deduplicateEvents } = require("./lib/newsEventDedup");
 const { buildEventEvidence } = require("./lib/newsEventEvidence");
 const { persistValidatedEvents } = require("./lib/newsEventPersistence");
 const { loadNewsLageV2 } = require("./lib/newsLageV2");
+const { loadStrategicMarketIntelligence } = require("./lib/strategicMarketIntelligenceIntegration");
 const { loadHistoricalEventOutcomeAssociations } = require("./lib/eventOutcomeAggregation");
 const { refreshPendingEventOutcomes } = require("./lib/eventOutcomePendingRefresh");
 const { NewsClassificationCache } = require("./lib/newsClassificationCache");
@@ -605,6 +606,10 @@ app.post("/api/refresh", async (req, res) => {
       evidenceFusion,
       newsDiagnostics,
       marketState,
+      // Read-only persisted-event views; failures remain local to this section.
+      strategicMarketIntelligence: loadStrategicMarketIntelligence({
+        databasePath: path.join(appDir, "data", "news-events.db"),
+      }),
     });
   } catch (err) {
     console.error("[/api/refresh] Fehler:", err);
