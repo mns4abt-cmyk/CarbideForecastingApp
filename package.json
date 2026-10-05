@@ -7,10 +7,21 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
+    "test": "node --test",
+    "diagnose:news": "node scripts/diagnose-news.js",
+    "diagnose:ai": "node scripts/diagnose-ai.js",
+    "diagnose:news-events": "node scripts/diagnose-news-events.js",
+    "diagnose:news-lage": "node scripts/diagnose-news-lage.js",
+    "diagnose:strategic-intelligence": "node scripts/diagnose-strategic-intelligence.js",
+    "backfill:news-events": "node scripts/backfill-news-events.js",
+    "backfill:strategic-tags": "node scripts/backfill-strategic-tags.js",
+    "backfill:event-outcomes": "node scripts/backfill-event-outcomes.js",
+    "diagnose:event-outcomes": "node scripts/diagnose-event-outcomes.js",
+    "diagnose:fusion": "node scripts/diagnose-fusion.js",
     "package:win": "pkg server.js --config package.json --targets node22-win-x64 --output dist/CarbideMarktradar.exe"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
@@ -22,7 +33,8 @@
   },
   "pkg": {
     "assets": [
-      "public/**/*"
+      "public/**/*",
+      "config/**/*"
     ]
   }
 }

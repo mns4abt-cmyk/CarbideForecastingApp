@@ -141,20 +141,29 @@ const SCENARIOS = [
   },
 ];
 
-// Serien je Szenario berechnen
-function computeScenarioSeries() {
+// Serien je Szenario berechnen.
+// Nimmt optional eine ECHTE Basis-Fortschreibung (z.B. die p50-Modellprognose aus
+// forecasting/pipeline.py) samt letzten realen Beobachtungswerten entgegen. Ohne
+// Argumente (z.B. beim ersten Laden im Browser, bevor /api/refresh geantwortet hat)
+// wird auf die illustrative interne Fortschreibung zurückgefallen, damit die Seite
+// sofort etwas anzeigen kann.
+function computeScenarioSeries(baseChina, baseEu, lastChina, lastEu) {
+  const chinaBase = baseChina || BASE_CHINA_FORECAST;
+  const euBase = baseEu || BASE_EU_FORECAST;
+  const refChina = lastChina != null ? lastChina : LAST_CHINA;
+  const refEu = lastEu != null ? lastEu : LAST_EU;
+  const horizon = chinaBase.length;
+
   return SCENARIOS.map((sc) => {
     const chinaSeries = [];
     const euSeries = [];
-    for (let i = 1; i <= 12; i++) {
+    for (let i = 1; i <= horizon; i++) {
       const delta = sc.deltaFn(i);
-      const chinaBase = BASE_CHINA_FORECAST[i - 1];
-      const euBase = BASE_EU_FORECAST[i - 1];
-      chinaSeries.push(Math.round(chinaBase * (1 + delta.china / 100) * 10) / 10);
-      euSeries.push(Math.round(euBase * (1 + delta.eu / 100) * 10) / 10);
+      chinaSeries.push(Math.round(chinaBase[i - 1] * (1 + delta.china / 100) * 10) / 10);
+      euSeries.push(Math.round(euBase[i - 1] * (1 + delta.eu / 100) * 10) / 10);
     }
-    const changeChina = Math.round(((chinaSeries[11] - LAST_CHINA) / LAST_CHINA) * 1000) / 10;
-    const changeEu = Math.round(((euSeries[11] - LAST_EU) / LAST_EU) * 1000) / 10;
+    const changeChina = Math.round(((chinaSeries[horizon - 1] - refChina) / refChina) * 1000) / 10;
+    const changeEu = Math.round(((euSeries[horizon - 1] - refEu) / refEu) * 1000) / 10;
     return { ...sc, china: chinaSeries, eu: euSeries, expectedChange12m: { china: changeChina, eu: changeEu } };
   });
 }
@@ -178,6 +187,7 @@ return {
   LAST_EU,
   SCENARIOS: SCENARIO_SERIES,
   NEWS,
+  BASELINE: null, // erst nach /api/refresh verfügbar (echtes p10/p50/p90 aus forecasting/pipeline.py)
   computeScenarioSeries,
 };
 

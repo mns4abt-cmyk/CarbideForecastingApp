@@ -3,3 +3,6 @@ node_modules/
 npm-debug.log*
 dist/
 .pkg-cache/
+data/cache/
+data/news-events.db
+.cache/

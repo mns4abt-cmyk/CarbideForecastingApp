@@ -18,7 +18,7 @@
     </div>
     <div class="header-meta">
       <span class="meta-pill">Letzte Aktualisierung: <b id="lastUpdate"></b></span>
-      <span class="meta-pill meta-pill-muted">Einheit: USD / kg (WO₃)</span>
+      <span class="meta-pill meta-pill-muted" id="unitDisplay">Einheit: Index (Heute = 100)</span>
       <span class="meta-pill meta-pill-ai" id="aiStatusPill" hidden></span>
       <button id="refreshBtn" class="refresh-btn" type="button">
         <span class="refresh-icon">⟳</span> Aktualisieren
@@ -48,11 +48,70 @@
         </div>
 
         <div class="legend" id="chartLegend"></div>
+        <p class="chart-note">Forecast intervals reflect model uncertainty. Scenarios are historically calibrated stress / what-if paths.</p>
       </div>
+
+      <div class="card current-market-card" id="currentMarketCard" hidden>
+        <div class="card-header">
+          <h2 id="newsLageTitle">News-Lage &ndash; letzte 30 Tage <span class="badge badge-category">Separate Einordnung</span></h2>
+          <label class="scenario-chip" id="currentMarketToggleWrap">
+            <input type="checkbox" id="currentMarketToggle" />
+            <span class="dot" id="currentMarketDot"></span>
+            News-Szenario im Chart anzeigen
+          </label>
+        </div>
+        <p class="current-market-scenario-label" id="currentMarketLabel">Separates 12M-News-Szenario</p>
+        <div class="insight-changes" id="currentMarketChanges"></div>
+        <div class="news-lage-scale" id="newsLageScale" hidden aria-label="Sentiment-Skala von minus 100 bis plus 100">
+          <div><span>-100</span><span>0</span><span>+100</span></div>
+          <div><span>bearish</span><span>neutral</span><span>bullish</span></div>
+        </div>
+        <p class="insight-text" id="currentMarketSummary"></p>
+        <p class="current-market-note" id="newsLageMethodology" hidden>Der Sentiment Score wird deterministisch aus validierten Nachrichtenereignissen der letzten 30 Tage berechnet. Neuere und materiellere Ereignisse erhalten ein h&ouml;heres Gewicht. Der Score ver&auml;ndert den statistischen Preisforecast nicht.</p>
+        <details class="news-lage-details" id="newsLageDetails" hidden>
+          <summary>Methodik anzeigen</summary>
+          <p>Ber&uuml;cksichtigt werden validierte, deduplizierte Ereignisse mit Marktbezug. Richtung, Reifegrad, Relevanz und Aktualit&auml;t werden deterministisch gewichtet.</p>
+        </details>
+        <details class="news-lage-events" id="newsLageEvents" hidden>
+          <summary>Ereignisse der letzten 30 Tage</summary>
+          <div id="newsLageEventsContent"></div>
+        </details>
+        <details class="event-outcomes-panel" id="eventOutcomesPanel" hidden>
+          <summary>Ereignis- und Preisverlauf</summary>
+          <div id="eventOutcomesContent"></div>
+          <p class="event-outcomes-note">Die dargestellten Preisbewegungen zeigen zeitliche Zusammenh&auml;nge nach einem Ereignis und keine nachgewiesene Kausalit&auml;t.</p>
+        </details>
+      </div>
+
+      <div class="card historical-association-card" id="historicalAssociationCard" hidden>
+        <details class="historical-association-details">
+          <summary>Historische Ereignisassoziationen</summary>
+          <div id="historicalAssociationContent"></div>
+          <p class="historical-association-note">Die dargestellten Werte beschreiben historische nachfolgende Preisbewegungen und keine nachgewiesene kausale Wirkung. Sie ver&auml;ndern weder den statistischen Forecast noch die News-Lage.</p>
+        </details>
+      </div>
+
+      <div class="card evidence-fusion-card" id="evidenceFusionCard">
+        <div class="card-header">
+          <h2>Evidenz-Check</h2>
+          <div class="evidence-fusion-horizons" id="evidenceFusionHorizons" aria-label="Evidenz-Zeithorizont">
+            <button type="button" data-horizon="4">4 Wochen</button>
+            <button type="button" data-horizon="12" class="active">12 Wochen</button>
+            <button type="button" data-horizon="26">26 Wochen</button>
+          </div>
+        </div>
+        <div class="evidence-fusion-content" id="evidenceFusionContent"></div>
+        <p class="evidence-fusion-note">Nachrichten verändern den statistischen Preisforecast nicht.</p>
+      </div>
+
+      <section class="card strategic-market-card" aria-labelledby="strategicMarketTitle">
+        <h2 id="strategicMarketTitle">Strategische Marktbeobachtung</h2>
+        <div id="strategicMarketContent"></div>
+      </section>
 
       <div class="card insights-card">
         <h2>Sachliche Szenario-Einschätzungen</h2>
-        <p class="insights-sub">Erwartete Preisentwicklung in 12 Monaten je aktivem Szenario, abgeleitet aus den aktuellen Markttreibern.</p>
+        <p class="insights-sub">Historisch kalibrierte Stressszenarien relativ zur statistischen Baseline.</p>
         <div id="insightsList" class="insights-list"></div>
       </div>
 
@@ -60,7 +119,7 @@
 
     <aside class="news-col">
       <div class="card news-card">
-        <h2>Voices of the Market</h2>
+        <h2>Stimmen des Marktes</h2>
         <p class="news-sub">Wichtigste Marktmeldungen. Anklicken hebt zugehörige Szenarien im Chart hervor.</p>
         <div id="newsList" class="news-list"></div>
       </div>
@@ -69,16 +128,21 @@
   </main>
 
   <footer class="app-footer">
-    Die News im Bereich "Voices of the Market" werden bei Klick auf "Aktualisieren" live von Google
-    News abgerufen (echte Artikel, mit "Live"-Kennzeichnung) – Kategorie, Sentiment und Einschätzung
-    dazu werden per KI (Bosch Model Farm) auf Basis des Artikels generiert und sind daher
-    Einschätzungen, keine garantierten Fakten.
+    Die Meldungen im Bereich „Stimmen des Marktes“ stammen aus konfigurierten öffentlichen
+    Nachrichtenquellen. Kategorie, Marktrichtung und KI-Einordnung werden lokal verarbeitet und dienen
+    der analytischen Einordnung, nicht als garantierte Fakten oder direkte Preisprognose.
   </footer>
 
 </div>
 
 <script src="js/data.js"></script>
 <script src="js/chart.js"></script>
+<script src="js/evidenceFusionPanel.js"></script>
+<script src="js/historicalAssociationPanel.js"></script>
+<script src="js/strategicMarketPanel.js"></script>
+<script src="js/forecastPresentation.js"></script>
+<script src="js/aiStatus.js"></script>
+<script src="js/newsLageManagementPanel.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
