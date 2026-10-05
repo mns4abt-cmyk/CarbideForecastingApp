@@ -52,8 +52,9 @@ test("footer and News-Lage copy are provider-neutral and retain a v2 history pat
   assert.match(index, /-100[\s\S]*0[\s\S]*\+100/);
   assert.match(app, /NEWS_LAGE: json\.newsLage \|\| null/);
   assert.match(app, /function renderNewsLageV2Card/);
-  assert.match(app, /gespeicherte Ereignisse/);
-  assert.match(app, /mit validierter Richtung/);
+  const management = require("../public/js/newsLageManagementPanel").render();
+  assert.match(management, /Validierte Ereignisse/);
+  assert.match(management, /Gerichtete Ereignisse/);
   assert.match(app, /newsLageEventsContent/);
   assert.match(app, /eventOutcomesPanel/);
   assert.match(app, /Preis zum Ereignis/);

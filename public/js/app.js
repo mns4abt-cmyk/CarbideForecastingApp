@@ -305,45 +305,13 @@
     els.currentMarketToggleWrap.hidden = true;
     const windowDays = newsLage.windowDays || 30;
     els.newsLageTitle.innerHTML = `News-Lage &ndash; letzte ${windowDays} Tage <span class="badge badge-category">Separate Einordnung</span>`;
-    els.currentMarketLabel.textContent = "Gespeicherte, validierte Ereignishistorie";
-    els.newsLageScale.hidden = !newsLage.available;
-    els.newsLageMethodology.hidden = false;
-    els.newsLageDetails.hidden = false;
+    els.currentMarketLabel.textContent = "";
+    els.newsLageScale.hidden = true;
+    els.newsLageMethodology.hidden = true;
+    els.newsLageDetails.hidden = true;
     els.newsLageEvents.hidden = !newsLage.available;
     els.eventOutcomesPanel.hidden = !newsLage.available;
-    const scoreClass = (score) => score > 20 ? "bullish" : score < -20 ? "bearish" : "neutral";
-    const scoreColor = (score) => score > 20 ? "#d1495b" : score < -20 ? "#2a9d8f" : "#6b7789";
-    const qualitativeLabel = (label) => ({
-      "stark bearish": "Stark bearish",
-      bearish: "Bearish",
-      "neutral/ausgeglichen": "Neutral / ausgeglichen",
-      bullish: "Bullish",
-      "stark bullish": "Stark bullish",
-    })[label] || "Nicht verf\u00fcgbar";
-    const formatScore = (score) => `${score > 0 ? "+" : ""}${Math.round(score)}`;
-    const formatLastUpdated = (value) => {
-      const date = new Date(value);
-      return Number.isNaN(date.getTime()) ? "\u2014" : fmtDateTime(date);
-    };
-    const marketCard = (label, result) => {
-      if (!newsLage.available || result.sentimentScore === null) {
-        return `<div class="news-lage-market news-lage-unavailable"><strong>${label}</strong><span>Nicht verf\u00fcgbar</span></div>`;
-      }
-      return `<div class="news-lage-market">
-        <span class="news-lage-market-name">${label}</span>
-        <strong class="news-lage-score ${scoreClass(result.sentimentScore)}" title="Sentiment Score auf einer Skala von -100 bis +100">${formatScore(result.sentimentScore)}</strong>
-        <span class="badge badge-${scoreClass(result.sentimentScore)}">${qualitativeLabel(result.qualitativeLabel)}</span>
-        <span class="news-lage-meta">${result.totalEventCount} gespeicherte Ereignisse &middot; ${result.directionalEventCount} mit validierter Richtung</span>
-        <span class="news-lage-meta">Letzte Aktualisierung: ${formatLastUpdated(result.lastUpdatedAt)}</span>
-      </div>`;
-    };
-    const china = newsLage.china;
-    const eu = newsLage.eu;
-    els.currentMarketDot.style.background = newsLage.available ? scoreColor((china.sentimentScore || 0) + (eu.sentimentScore || 0)) : "#6b7789";
-    const markets = state.region === "china" ? [["China", china]]
-      : state.region === "eu" ? [["EU", eu]]
-      : [["China", china], ["EU", eu]];
-    els.currentMarketChanges.innerHTML = markets.map(([label, result]) => marketCard(label, result)).join("");
+    els.currentMarketChanges.innerHTML = window.NewsLageManagementPanel.render({ newsLage, region: state.region });
     const escapeHtml = (value) => String(value ?? "").replace(/[&<>'"]/g, (character) => ({
       "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
     })[character]);
@@ -435,9 +403,7 @@
         renderNewsLageV2Card(newsLage);
       });
     }
-    els.currentMarketSummary.textContent = newsLage.available
-      ? `30-Tage-Einordnung f\u00fcr ${state.region === "both" ? "China und EU" : state.region === "china" ? "China" : "die EU"}.`
-      : "News-Lage aus der lokalen Ereignishistorie ist derzeit nicht verf\u00fcgbar. Die statistische Basisprognose bleibt unver\u00e4ndert.";
+    els.currentMarketSummary.textContent = "";
   }
 
   function renderCurrentMarketCard() {

@@ -113,7 +113,7 @@ test("News-Lage v2 API shape is sourced from the persisted 30-day event history"
     }]);
     assert.deepEqual(Object.keys(result.events.china[0]).sort(), [
       "category", "chinaRelevance", "confidence", "direction", "duplicateCount", "effectiveMarketRelevance",
-      "euRelevance", "eventId", "eventStage", "evidenceMaturity", "finalWeight", "firstSeenAt", "globalRelevance",
+      "euRelevance", "eventId", "eventKey", "eventStage", "evidenceMaturity", "finalWeight", "firstSeenAt", "globalRelevance",
       "priceOutcomes", "publishedAt", "severity", "sourceCount", "sources", "title",
     ]);
   } finally {

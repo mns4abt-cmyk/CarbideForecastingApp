@@ -306,3 +306,34 @@ body {
   .layout { flex-direction: column; }
   .news-col { min-width: 0; width: 100%; }
 }
+
+/* API-driven News-Lage summary; technical evidence stays in native details. */
+.news-lage-management {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 24px;
+  width: 100%;
+  min-width: 0;
+  font-size: .875rem;
+  font-weight: 400;
+  line-height: 1.55;
+}
+.news-management-market { min-width: 0; overflow-wrap: anywhere; }
+.news-management-market h3 { margin: 0 0 16px; }
+.news-management-market h4 { margin: 16px 0 6px; font-size: .85rem; }
+.news-management-market p { margin: 6px 0 12px; }
+.news-management-summary { white-space: pre-wrap; }
+.news-management-label { font-size: 1.15rem; font-weight: 700; }
+.news-management-counts { display: flex; flex-wrap: wrap; gap: 12px 24px; margin: 16px 0; }
+.news-management-counts dt { font-size: .78rem; color: var(--text-muted); }
+.news-management-counts dd { margin: 2px 0 0; font-weight: 600; }
+.news-management-status { color: var(--text-muted); font-size: .8rem; }
+.news-management-events { padding-left: 22px; margin: 8px 0 16px; }
+.news-management-events li { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.news-management-events strong,
+.news-management-events span,
+.news-management-events time,
+.news-management-events small { display: block; }
+.news-management-events time,
+.news-management-events span,
+.news-management-events small { font-size: .76rem; color: var(--text-muted); }
