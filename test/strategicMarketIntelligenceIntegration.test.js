@@ -66,11 +66,10 @@ test("refresh exposes populated persisted views with API maps and methodology", 
   const smi = response.strategicMarketIntelligence;
   assert.equal(smi.status, "available");
   assert.equal(smi.windowDays, 30);
-  assert.deepEqual(Object.keys(smi.entities), ["almonty", "masan", "jinlu"]);
-  assert.deepEqual(Object.keys(smi.topics), ["chinaTcOperators", "exportControls"]);
+  assert.deepEqual(Object.keys(smi.entities), ["almonty", "masan", "xiamenGoldenEgret", "treibacher", "hcStarck"]);
+  assert.deepEqual(smi.topics, {});
   assert.equal(smi.entities.almonty.totalEventCount, 1);
   assert.equal(smi.entities.masan.id, "masan_group");
-  assert.equal(smi.topics.exportControls.totalEventCount, 1);
   assert.equal(smi.entities.almonty.latestEvents[0].source, "Test publisher");
   assert.deepEqual(smi.methodology, { source: "validated_persisted_news_events",
     additionalLlmCalls: false, numericalForecastAdjustmentApplied: false });

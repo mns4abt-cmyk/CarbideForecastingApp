@@ -41,6 +41,7 @@
     eventOutcomesContent: document.getElementById("eventOutcomesContent"),
     historicalAssociationCard: document.getElementById("historicalAssociationCard"),
     historicalAssociationContent: document.getElementById("historicalAssociationContent"),
+    historicalEventTimelineContent: document.getElementById("historicalEventTimelineContent"),
     evidenceFusionHorizons: document.getElementById("evidenceFusionHorizons"),
     evidenceFusionContent: document.getElementById("evidenceFusionContent"),
     strategicMarketContent: document.getElementById("strategicMarketContent"),
@@ -49,6 +50,8 @@
   // Von D abgeleitete Werte werden nach jedem Refresh neu berechnet (siehe recomputeDerived).
   let ALL_LABELS = [...D.HISTORY_LABELS, ...D.FORECAST_LABELS];
   let HIST_COUNT = D.HISTORY_LABELS.length;
+  let historicalEventTimeline;
+  let historicalTimelineRequest = 0;
 
   function recomputeDerived() {
     ALL_LABELS = [...D.HISTORY_LABELS, ...D.FORECAST_LABELS];
@@ -488,6 +491,36 @@
     });
   }
 
+  // Separate read-only event-study visualization. Its GET request is never a
+  // refresh trigger and its data does not feed charts, forecasts, or scenarios.
+  function renderHistoricalEventTimeline() {
+    if (!historicalEventTimeline) {
+      historicalEventTimeline = window.HistoricalEventTimeline.create(els.historicalEventTimelineContent);
+    }
+    historicalEventTimeline.update({
+      timeline: state.historicalTimeline,
+      associations: D.HISTORICAL_EVENT_ASSOCIATIONS,
+    });
+  }
+
+  async function loadHistoricalEventTimeline() {
+    const requestId = ++historicalTimelineRequest;
+    try {
+      const res = await fetch("/api/historical-event-prices");
+      const timeline = await res.json().catch(() => null);
+      if (!res.ok || !timeline) throw new Error("Historische Ereignis-Preis-Daten sind nicht verfügbar.");
+      if (requestId !== historicalTimelineRequest) return;
+      state.historicalTimeline = timeline;
+    } catch (error) {
+      if (requestId !== historicalTimelineRequest) return;
+      state.historicalTimeline = {
+        available: false,
+        error: { message: "Historische Ereignis-Preis-Daten sind derzeit nicht verfügbar." },
+      };
+    }
+    renderHistoricalEventTimeline();
+  }
+
   // ---- Evidenz-Check (rein erklärend; verwendet ausschließlich API-Fusionsergebnisse) -----
   function renderEvidenceFusion() {
     els.evidenceFusionContent.innerHTML = window.EvidenceFusionPanel.render({
@@ -567,6 +600,7 @@
         renderChart();
         renderCurrentMarketCard();
         renderHistoricalAssociations();
+        renderHistoricalEventTimeline();
         renderEvidenceFusion();
       });
     });
@@ -637,6 +671,7 @@
       renderScenarioToggles();
       renderCurrentMarketCard();
       renderHistoricalAssociations();
+      renderHistoricalEventTimeline();
       renderEvidenceFusion();
       renderStrategicMarket();
       renderChart();
@@ -670,6 +705,7 @@
     wireEvidenceFusionHorizons();
     renderScenarioToggles();
     renderHistoricalAssociations();
+    renderHistoricalEventTimeline();
     renderEvidenceFusion();
     renderStrategicMarket();
     renderChart();
@@ -677,7 +713,11 @@
     renderNews();
     els.refreshBtn.addEventListener("click", refreshData);
     fetchStatus();
-    window.addEventListener("resize", renderChart);
+    loadHistoricalEventTimeline();
+    window.addEventListener("resize", () => {
+      renderChart();
+      renderHistoricalEventTimeline();
+    });
     // Beim Laden direkt echte News abrufen, damit nie eine leere Liste zu sehen ist.
     refreshData();
   }

@@ -50,6 +50,7 @@ const { loadNewsLageV2 } = require("./lib/newsLageV2");
 const { loadStrategicMarketIntelligence } = require("./lib/strategicMarketIntelligenceIntegration");
 const { loadHistoricalEventOutcomeAssociations } = require("./lib/eventOutcomeAggregation");
 const { refreshPendingEventOutcomes } = require("./lib/eventOutcomePendingRefresh");
+const { loadHistoricalEventPriceTimeline } = require("./lib/historicalEventPriceTimeline");
 const { NewsClassificationCache } = require("./lib/newsClassificationCache");
 const { buildEvidenceFusionDiagnostics } = require("./lib/evidenceFusionIntegration");
 const { resolvePythonInterpreter } = require("./lib/pythonResolver");
@@ -252,6 +253,15 @@ async function fetchRealNews(limit) {
 app.get("/api/status", async (req, res) => {
   const ai = await newsClassifier.health();
   res.json({ ok: true, aiConfigured: ai.available, model: ai.model, aiProvider: ai });
+});
+
+// Read-only event-study data for the historical timeline. It intentionally
+// does not invoke refresh, news retrieval, classification, or any persistence.
+app.get("/api/historical-event-prices", async (req, res) => {
+  const timeline = await loadHistoricalEventPriceTimeline({
+    databasePath: path.join(appDir, "data", "news-events.db"),
+  });
+  res.status(timeline.available ? 200 : 503).json(timeline);
 });
 
 // ---- Validierung der News-Klassifizierung ------------------------------------------------

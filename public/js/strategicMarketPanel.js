@@ -5,8 +5,6 @@
 })(typeof window !== "undefined" ? window : globalThis, function () {
   "use strict";
 
-  const TOPIC_CARDS = [["topics", "chinaTcOperators", "China TC Betreiber"],
-    ["topics", "exportControls", "Exportkontrollen"]];
   const CATEGORY = { supply: "Angebot", demand: "Nachfrage", regulation: "Regulierung",
     geopolitics: "Geopolitik", technology: "Technologie", macro: "Makroökonomie", other: "Sonstiges" };
   const DIRECTION = { bullish: "Aufwärtsdruck", bearish: "Abwärtsdruck", neutral: "Keine klare Richtung" };
@@ -35,7 +33,7 @@
     // Definitions are supplied by the confirmed server configuration, never
     // guessed from article text or from generic China TC topic membership.
     const definitions = Array.isArray(report?.entityDefinitions) ? report.entityDefinitions : [];
-    const cards = [...definitions.map(entry => ["entities", entry.apiKey, entry.displayName]), ...TOPIC_CARDS].map(([group, id, name]) => {
+    const cards = definitions.map(entry => ["entities", entry.apiKey, entry.displayName]).map(([group, id, name]) => {
       const view = report?.[group]?.[id];
       const available = report?.status === "available" && ["available", "no_matching_events"].includes(view?.status);
       let body;
@@ -55,9 +53,9 @@
       }
       return `<article class="strategic-card"><h3>${escape(name)}</h3>${body}</article>`;
     }).join("");
-    return `<p class="strategic-note">Marktübergreifende Unternehmens- und Themenbeobachtung, keine Preisprognose und keine Unternehmensbewertung oder Empfehlung. Wolfram/APT-Preisdruck beschreibt die validierte Ereignisrichtung, keine nachgewiesene kausale Wirkung.</p>
+    return `<p class="strategic-note">Marktübergreifende Unternehmensbeobachtung, keine Preisprognose und keine Unternehmensbewertung oder Empfehlung. Wolfram/APT-Preisdruck beschreibt die validierte Ereignisrichtung, keine nachgewiesene kausale Wirkung.</p>
       <div class="strategic-grid">${cards}</div>
-      <p class="strategic-note">Die strategische Marktbeobachtung gruppiert bereits validierte Nachrichtenereignisse nach wichtigen Marktteilnehmern und Themen. Es werden keine zusätzlichen KI-Prognosen erzeugt.</p>`;
+      <p class="strategic-note">Die strategische Marktbeobachtung gruppiert bereits validierte Nachrichtenereignisse nach benannten Unternehmen. Es werden keine zusätzlichen KI-Prognosen erzeugt.</p>`;
   }
   return { render };
 });

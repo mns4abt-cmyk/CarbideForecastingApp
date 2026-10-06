@@ -39,11 +39,21 @@ test("one failed Google query is isolated and does not discard successful articl
 });
 
 test("production Google queries are tungsten-specific and exclude broad generic discovery queries", () => {
-  assert.ok(GOOGLE_NEWS_QUERIES.length >= 6 && GOOGLE_NEWS_QUERIES.length <= 10);
+  assert.ok(GOOGLE_NEWS_QUERIES.length >= 18 && GOOGLE_NEWS_QUERIES.length <= 24);
   for (const query of GOOGLE_NEWS_QUERIES) {
     assert.match(query.query, /tungsten|wolfram|ammonium paratungstate/i, query.query);
     assert.doesNotMatch(query.query, /mining stocks|commodity markets|china markets|industrial metals/i, query.query);
   }
+});
+
+test("company discovery queries stay commodity-qualified and cover every watchlist entity", () => {
+  const companyQueries = [
+    "Almonty tungsten", "Almonty wolfram", "Masan tungsten", "Masan High-Tech Materials tungsten",
+    "Xiamen Golden Egret tungsten", "Golden Egret tungsten", "Jinlu tungsten",
+    "Treibacher tungsten", "Treibacher wolfram", "H.C. Starck tungsten", "HC Starck tungsten", "HC Starck wolfram",
+  ];
+  assert.deepEqual(GOOGLE_NEWS_QUERIES.filter(entry => companyQueries.includes(entry.query)).map(entry => entry.query), companyQueries);
+  for (const query of companyQueries) assert.match(query, /\b(?:tungsten|wolfram)\b/i, query);
 });
 
 test("Google source returns safe per-query RSS diagnostics", async () => {

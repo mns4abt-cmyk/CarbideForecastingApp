@@ -13,17 +13,30 @@
       "displayName": "Masan Group",
       "confirmed": true,
       "aliases": ["Masan", "Masan Group", "Masan High-Tech Materials", "Masan High-Tech", "Nui Phao", "Nui Phao Mining"]
-    }
-  ],
-  "chinaTcOperators": [
+    },
     {
-      "id": "jinlu",
-      "apiKey": "jinlu",
-      "displayName": "Jinlu",
+      "id": "xiamen_golden_egret",
+      "apiKey": "xiamenGoldenEgret",
+      "displayName": "Xiamen Golden Egret",
       "confirmed": true,
-      "aliases": ["Jinlu"]
+      "aliases": ["Xiamen Golden Egret Special Alloy Co., Ltd.", "Xiamen Golden Egret", "Golden Egret", "Jinlu"]
+    },
+    {
+      "id": "treibacher",
+      "apiKey": "treibacher",
+      "displayName": "Treibacher",
+      "confirmed": true,
+      "aliases": ["Treibacher"]
+    },
+    {
+      "id": "hc_starck",
+      "apiKey": "hcStarck",
+      "displayName": "H.C. Starck",
+      "confirmed": true,
+      "aliases": ["H.C. Starck", "HC Starck", "H C Starck"]
     }
   ],
-  "pendingChinaTcOperatorSlots": 2,
-  "confirmationNote": "Two additional China TC operators and their aliases require business confirmation. No identities or ranking are inferred. Add definitions only after confirmation; unconfirmed entries are excluded."
+  "chinaTcOperators": [],
+  "pendingChinaTcOperatorSlots": 0,
+  "confirmationNote": "The management watchlist uses only explicit confirmed company entities. Legacy topic tags, including China TC operators and export controls, are not watchlist entries; no operator ranking or additional identities are inferred."
 }

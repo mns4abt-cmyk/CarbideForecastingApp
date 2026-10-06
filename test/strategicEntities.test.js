@@ -7,13 +7,15 @@ const { queryStrategicMarketIntelligence } = require("../lib/strategicMarketInte
 const { loadStrategicMarketIntelligence } = require("../lib/strategicMarketIntelligenceIntegration");
 const { render } = require("../public/js/strategicMarketPanel");
 
-test("loads confirmed aliases, preserves Jinlu alone and documents two unnamed slots", () => {
+test("loads explicit confirmed company aliases without inferring a China TC operator list", () => {
   const config = loadStrategicEntities();
-  assert.deepEqual(confirmedEntities(config).map(e => e.id), ["almonty", "masan_group", "jinlu"]);
-  assert.deepEqual(config.chinaTcOperators.map(e => e.id), ["jinlu"]);
-  assert.deepEqual(config.chinaTcOperators[0].aliases, ["Jinlu"]);
-  assert.equal(config.pendingChinaTcOperatorSlots, 2);
-  assert.match(config.confirmationNote, /business confirmation/i);
+  assert.deepEqual(confirmedEntities(config).map(e => e.id), ["almonty", "masan_group", "xiamen_golden_egret", "treibacher", "hc_starck"]);
+  assert.deepEqual(config.chinaTcOperators, []);
+  assert.equal(config.pendingChinaTcOperatorSlots, 0);
+  assert.match(config.confirmationNote, /explicit confirmed company entities/i);
+  assert.deepEqual(config.entities.find(entry => entry.id === "xiamen_golden_egret").aliases, [
+    "Xiamen Golden Egret Special Alloy Co., Ltd.", "Xiamen Golden Egret", "Golden Egret", "Jinlu",
+  ]);
 });
 
 test("rejects malformed definitions, duplicate IDs/API keys and invalid confirmation flags", () => {
@@ -23,7 +25,7 @@ test("rejects malformed definitions, duplicate IDs/API keys and invalid confirma
     c => { c.entities[0].confirmed = "true"; },
     c => { c.entities[0].id = "__proto__"; },
     c => { c.chinaTcOperators.push({ ...c.entities[0] }); },
-    c => { c.chinaTcOperators[0].apiKey = "masan"; },
+    c => { c.chinaTcOperators.push({ ...c.entities[0] }); },
     c => { c.pendingChinaTcOperatorSlots = -1; },
   ]) {
     const config = structuredClone(loadStrategicEntities());
@@ -35,7 +37,9 @@ test("rejects malformed definitions, duplicate IDs/API keys and invalid confirma
 test("configured aliases retain unicode boundaries and hyphen matching", () => {
   for (const [title, expected] of [["Sangdong-Produktion", ["almonty"]],
     ["Masan High-Tech Materials", ["masan_group"]], ["Nui Phao Mining", ["masan_group"]],
-    ["JINLU", ["jinlu"]], ["Jinlux", []], ["超级Jinlu公司", []], ["Masanova", []]]) {
+    ["JINLU", ["xiamen_golden_egret"]], ["Xiamen Golden Egret", ["xiamen_golden_egret"]],
+    ["Treibacher", ["treibacher"]], ["H C Starck", ["hc_starck"]],
+    ["Jinlux", []], ["超级Jinlu公司", []], ["Masanova", []]]) {
     assert.deepEqual(tagStrategicEvent({ title }).entities, expected);
   }
 });
@@ -62,6 +66,6 @@ test("general China TC topic never creates individual operator identities", () =
   assert.deepEqual(general.entities, []);
   assert.ok(general.topics.includes("china_tc_operators"));
   const individual = tagStrategicEvent({ title: "Jinlu production" });
-  assert.deepEqual(individual.entities, ["jinlu"]);
+  assert.deepEqual(individual.entities, ["xiamen_golden_egret"]);
   assert.ok(!individual.topics.includes("china_tc_operators"));
 });

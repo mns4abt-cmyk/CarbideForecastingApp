@@ -73,15 +73,17 @@ test("counts distinct stored events, sorts newest first, and returns original fi
   assert.equal(event.euRelevance, 0.2);
 });
 
-test("matches persisted multi-tags only, without retagging titles or counting duplicate tags twice", (t) => {
+test("matches persisted entity tags only and ignores legacy topic metadata", (t) => {
   const f = fixture(t);
   f.insert("unrelated title", "2026-09-20", {}, {
-    entities: ["almonty", "masan_group", "jinlu"], topics: ["china_tc_operators", "export_controls"],
+    entities: ["almonty", "masan_group", "xiamen_golden_egret"], topics: ["china_tc_operators", "export_controls"],
   });
   f.insert("Almonty tungsten export controls", "2026-09-21", {}, null);
   const result = f.query();
-  assert.deepEqual(result.entities.map(v => [v.displayName, v.totalEventCount]), [["Almonty", 1], ["Masan Group", 1], ["Jinlu", 1]]);
-  assert.deepEqual(result.topics.map(v => v.totalEventCount), [1, 1]);
+  assert.deepEqual(result.entities.map(v => [v.displayName, v.totalEventCount]), [
+    ["Almonty", 1], ["Masan Group", 1], ["Xiamen Golden Egret", 1], ["Treibacher", 0], ["H.C. Starck", 0],
+  ]);
+  assert.deepEqual(result.topics, []);
 });
 
 test("empty views are explicit and querying does not alter database contents or schema", (t) => {

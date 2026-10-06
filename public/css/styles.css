@@ -226,6 +226,65 @@ body {
 .historical-association-empty { margin: 0; color: var(--text-muted); font-size: 0.78rem; }
 .historical-association-note { margin: 10px 0 0; color: var(--text-muted); font-size: 0.72rem; font-style: italic; line-height: 1.4; }
 
+/* ---------- Historische Ereignis-Preis-Beziehung (read-only event study) ---------- */
+.historical-event-timeline-card { border-color: #d9e0e8; }
+.historical-event-timeline-methodology { margin: 5px 0 14px; color: var(--text-muted); font-size: 0.78rem; line-height: 1.45; }
+.timeline-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 8px 12px; }
+.timeline-controls label, .timeline-association-head label { display: flex; flex-direction: column; gap: 3px; color: var(--text-muted); font-size: 0.68rem; font-weight: 700; }
+.timeline-controls select, .timeline-association-head select { border: 1px solid var(--border); border-radius: 6px; padding: 5px 7px; background: #fff; color: var(--text); font: inherit; font-size: 0.76rem; font-weight: 500; }
+.timeline-market-toggle { display: flex; gap: 4px; padding: 3px; border-radius: 7px; background: #f0f2f5; }
+.timeline-market-toggle button { border: 0; border-radius: 5px; padding: 5px 10px; background: transparent; color: var(--text-muted); font: inherit; font-size: 0.76rem; font-weight: 700; cursor: pointer; }
+.timeline-market-toggle button.active { background: var(--accent); color: #fff; }
+.timeline-market-label { margin: 12px 0 10px; color: var(--text-muted); font-size: 0.75rem; }
+.timeline-chart-section + .timeline-chart-section { margin-top: 14px; }
+.timeline-chart-heading { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 6px; }
+.timeline-chart-heading h3 { margin: 0; font-size: 0.86rem; }
+.timeline-chart-heading > span { color: var(--text-muted); font-size: 0.72rem; }
+.event-direction-legend { display: flex; flex-wrap: wrap; gap: 9px; color: var(--text-muted); font-size: 0.7rem; }
+.event-direction-legend span::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 4px; border-radius: 50%; }
+.event-direction-legend .bullish::before { background: var(--bullish); }
+.event-direction-legend .bearish::before { background: var(--bearish); }
+.event-direction-legend .neutral::before { background: var(--neutral); }
+.event-chart-wrap, .price-chart-wrap { width: 100%; overflow: hidden; border: 1px solid var(--border); border-radius: 8px; background: #fcfcfd; }
+.historical-event-chart-svg { display: block; width: 100%; height: 240px; }
+.historical-price-chart-svg { display: block; width: 100%; height: 290px; }
+.event-lane-0, .event-lane-2, .event-lane-4 { fill: #fafbfc; }
+.event-lane-1, .event-lane-3, .event-lane-5 { fill: #f4f6f8; }
+.event-lane-rule, .timeline-grid { stroke: #e1e5ea; stroke-width: 1; }
+.event-lane-label { fill: #556171; font: 11px "Segoe UI", sans-serif; font-weight: 600; }
+.timeline-axis-label { fill: #7a8493; font: 11px "Segoe UI", sans-serif; }
+.timeline-price-line { fill: none; stroke: var(--navy-2); stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+.event-cluster-marker { stroke: #fff; stroke-width: 1.5; cursor: pointer; }
+.event-cluster-marker:focus { outline: none; stroke: var(--accent); stroke-width: 3; }
+.event-cluster-marker.bullish { fill: var(--bullish); }
+.event-cluster-marker.bearish { fill: var(--bearish); }
+.event-cluster-marker.neutral { fill: var(--neutral); }
+.event-cluster-marker.is-selected { stroke: var(--accent); stroke-width: 3; }
+.event-cluster-count { fill: #fff; font: 9px "Segoe UI", sans-serif; font-weight: 700; pointer-events: none; }
+.selected-event-guide { stroke: var(--accent); stroke-width: 1.25; stroke-dasharray: 4 4; }
+.matched-price-observation { fill: #fff; stroke: var(--accent); stroke-width: 3; }
+.timeline-chart-note, .timeline-limitation, .timeline-interpretation, .timeline-forecast-note { margin: 7px 0 0; color: var(--text-muted); font-size: 0.73rem; line-height: 1.4; }
+.timeline-interpretation { padding-left: 9px; border-left: 3px solid var(--accent); }
+.timeline-forecast-note { font-style: italic; }
+.timeline-detail { margin-top: 12px; }
+.timeline-detail-record { border: 1px solid var(--border); border-radius: 8px; padding: 11px; background: #fff; }
+.timeline-detail-head { display: flex; justify-content: space-between; gap: 8px; color: var(--text-muted); font-size: 0.72rem; }
+.timeline-detail-record h3 { margin: 6px 0 0; font-size: 0.88rem; line-height: 1.4; }
+.timeline-detail-meta { margin: 5px 0 0; color: var(--text-muted); font-size: 0.74rem; line-height: 1.4; }
+.timeline-outcomes { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; margin-top: 11px; }
+.timeline-outcome { display: flex; flex-direction: column; gap: 2px; min-height: 70px; padding: 7px 8px; border-radius: 6px; background: #f8f9fb; font-size: 0.71rem; }
+.timeline-outcome strong { color: var(--text-muted); font-size: 0.68rem; }
+.timeline-outcome b { font-size: 0.74rem; }
+.timeline-outcome small { font-weight: 700; }
+.timeline-outcome.is-pending, .timeline-outcome.is-unavailable { color: var(--text-muted); }
+.timeline-association-summary { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+.timeline-association-head { display: flex; justify-content: space-between; align-items: end; gap: 12px; }
+.timeline-association-head h3 { margin: 0; font-size: 0.82rem; }
+.timeline-association-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 8px; margin-top: 9px; }
+.timeline-association-groups article { display: flex; flex-direction: column; gap: 4px; padding: 8px; border-radius: 6px; background: #f8f9fb; font-size: 0.71rem; line-height: 1.4; }
+.timeline-association-groups span, .timeline-association-empty, .timeline-empty { color: var(--text-muted); font-size: 0.74rem; }
+.timeline-association-empty, .timeline-empty { margin: 9px 0 0; }
+
 /* ---------- Evidenz-Check (read-only Fusion-Erklärung) ---------- */
 .evidence-fusion-card { border-color: #d9e0f0; }
 .evidence-fusion-horizons { display: flex; gap: 4px; padding: 3px; border-radius: 999px; background: #f0f2f5; }
@@ -305,6 +364,9 @@ body {
 @media (max-width: 900px) {
   .layout { flex-direction: column; }
   .news-col { min-width: 0; width: 100%; }
+  .timeline-outcomes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .timeline-controls { align-items: stretch; }
+  .timeline-chart-heading { align-items: flex-start; flex-direction: column; }
 }
 
 /* API-driven News-Lage summary; technical evidence stays in native details. */

@@ -9,7 +9,7 @@ test("company aliases map to stable unique entity tags", () => {
     ["Almonty Industries", "almonty"], ["Sangdong-Produktion", "almonty"],
     ["Masan", "masan_group"], ["Masan Group", "masan_group"],
     ["Masan High-Tech Materials", "masan_group"], ["Masan High-Tech", "masan_group"],
-    ["Nui Phao Mining", "masan_group"], ["Nui Phao", "masan_group"], ["Jinlu", "jinlu"],
+    ["Nui Phao Mining", "masan_group"], ["Nui Phao", "masan_group"], ["Jinlu", "xiamen_golden_egret"],
   ]) assert.deepEqual(tagStrategicEvent({ title }).entities, [entity], title);
   assert.deepEqual(tagStrategicEvent({ title: "Almonty and Sangdong meet Masan at Nui Phao" }).entities, ["almonty", "masan_group"]);
 });

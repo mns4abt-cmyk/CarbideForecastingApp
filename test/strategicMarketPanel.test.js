@@ -10,17 +10,21 @@ function report() {
   return { status: "available", windowDays: 30, entityDefinitions: [
     { id: "almonty", apiKey: "almonty", displayName: "Almonty" },
     { id: "masan_group", apiKey: "masan", displayName: "Masan Group" },
-    { id: "jinlu", apiKey: "jinlu", displayName: "Jinlu" },
+    { id: "xiamen_golden_egret", apiKey: "xiamenGoldenEgret", displayName: "Xiamen Golden Egret" },
+    { id: "treibacher", apiKey: "treibacher", displayName: "Treibacher" },
+    { id: "hc_starck", apiKey: "hcStarck", displayName: "H.C. Starck" },
   ], entities: {
     almonty: { status: "available", totalEventCount: 4, latestEventDate: latestEvents[0].date, latestEvents },
     masan: { status: "no_matching_events", totalEventCount: 0, latestEvents: [] },
   }, topics: {} };
 }
 
-test("renders five cards with three newest titles and all events in closed details", () => {
+test("renders five explicit-company cards with three newest titles and all events in closed details", () => {
   const html = render({ report: report() });
   assert.equal((html.match(/class="strategic-card"/g) || []).length, 5);
-  for (const name of ["Almonty", "Masan Group", "Jinlu", "China TC Betreiber", "Exportkontrollen"]) assert.ok(html.includes(name));
+  for (const name of ["Almonty", "Masan Group", "Xiamen Golden Egret", "Treibacher", "H.C. Starck"]) assert.ok(html.includes(name));
+  assert.ok(!html.includes("China TC Betreiber"));
+  assert.ok(!html.includes("Exportkontrollen"));
   const preview = html.slice(0, html.indexOf("<details"));
   assert.ok(preview.includes("Original title 24"));
   assert.ok(preview.includes("Original title 22"));
@@ -35,7 +39,7 @@ test("shows German metadata, price-pressure semantics and exact methodology", ()
   for (const label of ["4 Ereignisse / letzte 30 Tage", "Letztes Update: 24.09.2026",
     "Wolfram/APT-Preisdruck: Abwärtsdruck", "Kategorie: Angebot", "Phase: Tatsächlich wirksam",
     "Reife: Realisiert", "Quelle: Publisher", "keine Unternehmensbewertung",
-    "Die strategische Marktbeobachtung gruppiert bereits validierte Nachrichtenereignisse nach wichtigen Marktteilnehmern und Themen. Es werden keine zusätzlichen KI-Prognosen erzeugt."]) assert.ok(html.includes(label), label);
+    "Die strategische Marktbeobachtung gruppiert bereits validierte Nachrichtenereignisse nach benannten Unternehmen. Es werden keine zusätzlichen KI-Prognosen erzeugt."]) assert.ok(html.includes(label), label);
   assert.doesNotMatch(html, /Ã|�/);
 });
 
@@ -44,7 +48,8 @@ test("empty data uses exact wording and is not confused with unavailable storage
   assert.ok(html.includes("Keine validierten Ereignisse im gewählten Zeitraum."));
   assert.ok(html.includes("0 Ereignisse / letzte 30 Tage"));
   assert.ok(html.includes("Letztes Update: —"));
-  for (const value of [null, { status: "database_unavailable" }, { status: "tags_unavailable" }, { status: "unavailable" }]) {
+  for (const status of ["database_unavailable", "tags_unavailable", "unavailable"]) {
+    const value = { ...report(), status };
     const unavailable = render({ report: value });
     assert.ok(unavailable.includes("derzeit nicht verfügbar"));
     assert.ok(!unavailable.includes("0 Ereignisse"));
