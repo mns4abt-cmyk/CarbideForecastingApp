@@ -114,6 +114,26 @@ function formatMonthLabel(isoMonth) {
   return `${MONTH_NAMES_DE[month - 1]} ${String(year).slice(2)}`;
 }
 
+async function runRefreshStage(stage, operation) {
+  const startedAt = performance.now();
+  console.info("[refresh]", JSON.stringify({ timestamp: new Date().toISOString(), stage, outcome: "start" }));
+  try {
+    const result = await operation();
+    console.info("[refresh]", JSON.stringify({
+      timestamp: new Date().toISOString(), stage, outcome: "success",
+      durationMs: Math.round(performance.now() - startedAt),
+    }));
+    return result;
+  } catch (error) {
+    console.error("[refresh]", JSON.stringify({
+      timestamp: new Date().toISOString(), stage, outcome: "failure",
+      durationMs: Math.round(performance.now() - startedAt),
+      error: String(error?.message || error).slice(0, 500),
+    }));
+    throw error;
+  }
+}
+
 // Ruft "python forecasting/pipeline.py --json" per execFile auf (KEINE Shell, KEINE
 // String-Konkatenation eines Kommandos - Argumente werden als Array übergeben). Liefert das
 // vom Python-Skript auf stdout geschriebene JSON (build_frontend_payload); Python-Logging
@@ -357,13 +377,15 @@ function buildCurrentMarketSummary({ newsSource, aiEnabled, news, marketState })
 }
 
 app.post("/api/refresh", async (req, res) => {
+  const refreshStartedAt = performance.now();
+  console.info("[refresh]", JSON.stringify({ timestamp: new Date().toISOString(), stage: "refresh", outcome: "start" }));
   try {
     // Echte Historie + per Backtest gewähltes Modell/p50-Prognose aus forecasting/pipeline.py
     // (Excel-Daten) statt der illustrativen Konstanten aus public/js/data.js.
     let pipelineResult;
     let pythonInterpreter;
     try {
-      const forecastRun = await runForecastingPipeline();
+      const forecastRun = await runRefreshStage("forecasting_pipeline", runForecastingPipeline);
       pipelineResult = forecastRun.pipelineResult;
       pythonInterpreter = forecastRun.interpreter;
     } catch (err) {
@@ -390,7 +412,7 @@ app.post("/api/refresh", async (req, res) => {
     let newsSource;
     let newsDiagnostics;
     try {
-      const newsResult = await fetchRealNews(20);
+      const newsResult = await runRefreshStage("news_fetch_and_relevance", () => fetchRealNews(20));
       news = newsResult.news;
       newsDiagnostics = newsResult.diagnostics;
       newsDiagnostics.classifiedFresh = 0;
@@ -409,7 +431,7 @@ app.post("/api/refresh", async (req, res) => {
     let aiError = null;
     let aiProvider;
     try {
-      aiProvider = await newsClassifier.health();
+      aiProvider = await runRefreshStage("ollama_health", () => newsClassifier.health());
     } catch {
       aiProvider = {
         provider: newsClassifier.id,
@@ -439,11 +461,11 @@ app.post("/api/refresh", async (req, res) => {
           else fresh.push(item);
         });
         if (fresh.length && aiProvider.available) {
-          classificationResult = await classifySequentialBatches(
+          classificationResult = await runRefreshStage("llm_classification", () => classifySequentialBatches(
             newsClassifier,
             fresh,
             newsClassifier.id === "ollama" ? OLLAMA_BATCH_SIZE : MAX_LLM_ARTICLES
-          );
+          ));
         } else if (fresh.length) {
           classificationResult = {
             ...classificationResult,
@@ -507,25 +529,37 @@ app.post("/api/refresh", async (req, res) => {
     const classifiedEvidence = news.filter((n) => n.classificationStatus === "classified");
     const eventDeduplication = deduplicateEvents(classifiedEvidence);
     const eventEvidence = buildEventEvidence(eventDeduplication.representatives);
-    persistValidatedEvents(eventEvidence, eventDeduplication.representatives, {
+    await runRefreshStage("sqlite_persistence", () => persistValidatedEvents(eventEvidence, eventDeduplication.representatives, {
       databasePath: path.join(appDir, "data", "news-events.db"),
-    });
+    }));
     // Pending-only maintenance: it skips price loading when no pending rows
     // exist and isolates all failures from the forecast/news response.
-    await refreshPendingEventOutcomes({
+    await runRefreshStage("sqlite_pending_outcomes", () => refreshPendingEventOutcomes({
       databasePath: path.join(appDir, "data", "news-events.db"),
-    });
+    }));
     // News-Lage v2 is a read-only description of persisted, validated events
     // across its own 30-day history. Its failure is intentionally isolated from
     // forecasting, Fusion, stress scenarios, and the legacy currentMarket API.
+    const newsLageStartedAt = performance.now();
+    console.info("[refresh]", JSON.stringify({ timestamp: new Date().toISOString(), stage: "sqlite_news_lage_readback", outcome: "start" }));
     const newsLage = loadNewsLageV2({
       databasePath: path.join(appDir, "data", "news-events.db"),
     });
+    console.info("[refresh]", JSON.stringify({
+      timestamp: new Date().toISOString(), stage: "sqlite_news_lage_readback", outcome: "success",
+      durationMs: Math.round(performance.now() - newsLageStartedAt),
+    }));
     // Separate, additive historical-event study. It reads only persisted
     // completed outcomes and never informs forecast, News-Lage, Fusion, or scenarios.
+    const historicalEventAssociationsStartedAt = performance.now();
+    console.info("[refresh]", JSON.stringify({ timestamp: new Date().toISOString(), stage: "sqlite_outcome_readback", outcome: "start" }));
     const historicalEventAssociations = loadHistoricalEventOutcomeAssociations({
       databasePath: path.join(appDir, "data", "news-events.db"),
     });
+    console.info("[refresh]", JSON.stringify({
+      timestamp: new Date().toISOString(), stage: "sqlite_outcome_readback", outcome: "success",
+      durationMs: Math.round(performance.now() - historicalEventAssociationsStartedAt),
+    }));
     newsDiagnostics.eventRepresentativeCount = eventDeduplication.representatives.length;
     newsDiagnostics.duplicateArticleCount = classifiedEvidence.length - eventDeduplication.representatives.length;
 
@@ -558,12 +592,12 @@ app.post("/api/refresh", async (req, res) => {
     const currentMarketAvailable = newsSource === "live" && aiEnabled;
     let currentMarketScenario;
     try {
-      currentMarketScenario = await runCurrentMarketScenario(
+      currentMarketScenario = await runRefreshStage("current_market_scenario", () => runCurrentMarketScenario(
         marketState.china.overall,
         marketState.eu.overall,
         currentMarketAvailable,
         pythonInterpreter
-      );
+      ));
       currentMarketScenario.summary = buildCurrentMarketSummary({
         newsSource, aiEnabled, news, marketState,
       });
@@ -573,6 +607,10 @@ app.post("/api/refresh", async (req, res) => {
     }
     if (currentMarketScenario) scenarios.push(currentMarketScenario);
 
+    console.info("[refresh]", JSON.stringify({
+      timestamp: new Date().toISOString(), stage: "response_assembly", outcome: "success",
+      durationMs: Math.round(performance.now() - refreshStartedAt),
+    }));
     res.json({
       ok: true,
       generatedAt: new Date().toISOString(),

@@ -5,7 +5,7 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { NewsEventStore } = require("../lib/newsEventStore");
+const { NewsEventStore, stableEventId } = require("../lib/newsEventStore");
 const { persistValidatedEvents } = require("../lib/newsEventPersistence");
 const { deduplicateEvents } = require("../lib/newsEventDedup");
 const { buildEventEvidence } = require("../lib/newsEventEvidence");
@@ -71,7 +71,7 @@ test("inserts validated deduplicated event-level data with provenance", () => {
   try {
     store.upsertMany([evidence()], [representative()]);
     const row = store.db.prepare("SELECT * FROM news_events").get();
-    assert.equal(row.event_id, "event-1");
+    assert.equal(row.event_id, stableEventId(row.event_key));
     assert.equal(row.first_seen_at, "2026-09-02T12:00:00.000Z");
     assert.equal(row.published_at, "2026-09-01T10:00:00.000Z");
     assert.equal(row.duplicate_count, 2);
@@ -356,4 +356,41 @@ test("server persists only deduplicated validated event evidence", () => {
   const serverSource = fs.readFileSync(path.join(__dirname, "..", "server.js"), "utf8");
   assert.match(serverSource, /const eventEvidence = buildEventEvidence\(eventDeduplication\.representatives\);/);
   assert.match(serverSource, /persistValidatedEvents\(eventEvidence, eventDeduplication\.representatives, \{/);
+});
+
+test("repairs legacy IDs to canonical-key IDs while preserving tags and outcomes", () => {
+  const { directory, store } = createStore(() => "2026-09-10T12:00:00.000Z");
+  try {
+    store.upsert(evidence({ eventId: "legacy-a", headline: "Alpha tungsten production" }), representative({ eventKey: "a".repeat(64), title: "Alpha tungsten production" }));
+    store.upsert(evidence({ eventId: "legacy-b", headline: "Beta tungsten production" }), representative({ eventKey: "b".repeat(64), title: "Beta tungsten production" }));
+    store.upsertStrategicTags("a".repeat(64), { entities: ["almonty"], topics: ["production"] }, "strategic-v1");
+    store.upsertPriceOutcomes("legacy-a", { market: "china", eventDate: "2026-09-04", matchedPriceDate: "2026-09-04", priceAtEvent: 100, unit: "CNY/kg APT", outcomes: [{ horizonWeeks: 1, targetDate: "2026-09-11", status: "pending" }] });
+
+    assert.deepEqual(store.repairEventIdsToCanonicalKeys(), {
+      totalEvents: 2, updatedEvents: 2, updatedTags: 1, updatedOutcomes: 1, duplicateEventIds: [],
+    });
+    assert.equal(store.getAllEvents().find((event) => event.eventKey === "a".repeat(64)).eventId, stableEventId("a".repeat(64)));
+    assert.equal(store.getStrategicTags({ eventKey: "a".repeat(64) })[0].eventId, stableEventId("a".repeat(64)));
+    assert.equal(store.getPriceOutcomes({ eventId: stableEventId("a".repeat(64)) }).length, 1);
+    assert.deepEqual(store.repairEventIdsToCanonicalKeys(), {
+      totalEvents: 2, updatedEvents: 0, updatedTags: 0, updatedOutcomes: 0, duplicateEventIds: [],
+    });
+  } finally {
+    store.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("refuses to rewrite ambiguous price outcomes from colliding legacy IDs", () => {
+  const { directory, store } = createStore(() => "2026-09-10T12:00:00.000Z");
+  try {
+    store.upsert(evidence({ eventId: "legacy-duplicate", headline: "Alpha tungsten production" }), representative({ eventKey: "a".repeat(64), title: "Alpha tungsten production" }));
+    store.upsert(evidence({ eventId: "legacy-duplicate", headline: "Beta tungsten production" }), representative({ eventKey: "b".repeat(64), title: "Beta tungsten production" }));
+    store.upsertPriceOutcomes("legacy-duplicate", { market: "china", eventDate: "2026-09-04", matchedPriceDate: "2026-09-04", priceAtEvent: 100, unit: "CNY/kg APT", outcomes: [{ horizonWeeks: 1, targetDate: "2026-09-11", status: "pending" }] });
+    assert.throws(() => store.repairEventIdsToCanonicalKeys(), /outcomes attached to colliding legacy IDs/);
+    assert.equal(store.getAllEvents().filter((event) => event.eventId === "legacy-duplicate").length, 2);
+  } finally {
+    store.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
 });

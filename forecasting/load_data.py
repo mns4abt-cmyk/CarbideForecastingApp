@@ -4,7 +4,7 @@ Liest ausschließlich (niemals schreibend) aus:
     data/APT_Tungsten_EU.xlsx    - Long-Format, Spalten MaterialName/PriceDate/
                                     PriceUnit/Price/Description, Einheit "USD/mtu WO3".
     data/APT_Tungsten_China.xlsx - transponiertes Wide-Format, Zeilenlabel in
-                                    Spalte 0 ("日期" = Datum, "MID" = Mid-Preis,
+                                    Spalte 0 ("日期"/"Date" = Datum, "MID" = Mid-Preis,
                                     "AVG YTD" = Year-to-Date-Durchschnitt).
                                     Verwendet wird ausschließlich die "MID"-Zeile.
                                     Einheit laut Fachbereich: "CNY/kg APT".
@@ -111,7 +111,7 @@ def load_eu_data(path: Path = EU_XLSX_PATH) -> pd.DataFrame:
 def load_china_data(path: Path = CHINA_XLSX_PATH) -> pd.DataFrame:
     """Lädt und bereinigt die reale China-APT-Preisreihe ("MID"-Zeile, CNY/kg APT).
 
-    Das Sheet ist transponiert: Spalte 0 enthält Zeilenlabels ("日期", "MID",
+    Das Sheet ist transponiert: Spalte 0 enthält Zeilenlabels ("日期" oder "Date", "MID",
     "AVG YTD"), die eigentlichen Werte stehen ab Spalte 1. Es wird ausschließlich
     die "MID"-Zeile verwendet ("AVG YTD" ist eine per Excel-Formel fortgeschriebene
     Durchschnittsreihe und keine unabhängige Marktbeobachtung).
@@ -130,11 +130,11 @@ def load_china_data(path: Path = CHINA_XLSX_PATH) -> pd.DataFrame:
     raw = pd.read_excel(path, sheet_name="Sheet1", header=None, engine="openpyxl")
 
     row_labels = raw.iloc[:, 0].astype(str).str.strip()
-    date_rows = row_labels[row_labels == "日期"].index
+    date_rows = row_labels[row_labels.isin(["日期", "Date"])].index
     mid_rows = row_labels[row_labels == "MID"].index
     if len(date_rows) == 0 or len(mid_rows) == 0:
         raise ValueError(
-            f"Erwartete Zeilenlabel '日期'/'MID' nicht in {path.name} gefunden "
+            f"Erwartete Zeilenlabel '日期' oder 'Date' sowie 'MID' nicht in {path.name} gefunden "
             f"(gefundene Labels: {row_labels.tolist()})."
         )
 

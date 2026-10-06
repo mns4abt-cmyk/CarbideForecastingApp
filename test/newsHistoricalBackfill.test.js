@@ -6,7 +6,7 @@ const path = require("node:path");
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { NewsClassificationCache } = require("../lib/newsClassificationCache");
-const { NewsEventStore } = require("../lib/newsEventStore");
+const { NewsEventStore, stableEventId } = require("../lib/newsEventStore");
 const { runHistoricalNewsBackfill, selectAllInRefreshWindows } = require("../lib/newsHistoricalBackfill");
 
 function article(id, publishedAt = "2026-09-20T10:00:00.000Z", title = `China tungsten export controls ${id}`) {
@@ -119,7 +119,7 @@ test("a cached successful classification is validated and persisted without anot
   } finally { fs.rmSync(setup.directory, { recursive: true, force: true }); }
 });
 
-test("a fresh syndicated article updates its durable match without duplicating the legacy event id", async () => {
+test("a fresh syndicated article updates its durable match without duplicating the canonical event id", async () => {
   const original = article("original", "2026-09-20T10:00:00.000Z", "China tungsten export controls take effect");
   const setup = fixture([{ ...original, id: "syndicated", snippet: "Same confirmed restriction reported by a second source." }]);
   const store = new NewsEventStore({ databasePath: setup.databasePath });
@@ -141,7 +141,8 @@ test("a fresh syndicated article updates its durable match without duplicating t
     try {
       assert.equal(reopened.getAllEvents().length, 1);
       assert.deepEqual(reopened.getDuplicateEventIds(), []);
-      assert.equal(reopened.getAllEvents()[0].eventId, "event-legacy");
+      const [event] = reopened.getAllEvents();
+      assert.equal(event.eventId, stableEventId(event.eventKey));
     } finally { reopened.close(); }
   } finally { fs.rmSync(setup.directory, { recursive: true, force: true }); }
 });

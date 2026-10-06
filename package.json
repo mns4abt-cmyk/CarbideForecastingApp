@@ -15,6 +15,7 @@
     "diagnose:strategic-intelligence": "node scripts/diagnose-strategic-intelligence.js",
     "backfill:news-events": "node scripts/backfill-news-events.js",
     "backfill:strategic-tags": "node scripts/backfill-strategic-tags.js",
+    "repair:event-identities": "node scripts/repair-event-identities.js",
     "backfill:event-outcomes": "node scripts/backfill-event-outcomes.js",
     "diagnose:event-outcomes": "node scripts/diagnose-event-outcomes.js",
     "diagnose:fusion": "node scripts/diagnose-fusion.js",
