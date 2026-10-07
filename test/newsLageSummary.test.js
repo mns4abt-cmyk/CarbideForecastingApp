@@ -85,3 +85,57 @@ test('one market failure does not suppress the other market; empty/unavailable n
   assert.deepEqual(await summarizeNewsLage(empty, options), empty);
   assert.equal(calls, 2);
 });
+
+const headlineEvents = [
+  { ...event, eventKey: 'h1', title: 'Tungsten Price Shock Signals Deeper Supply Crisis', source: 'Market News' },
+  { ...event, eventKey: 'h2', title: 'Almonty Ends Legal Ambiguity in Ontario While Restarting Korean Tungsten Output', source: 'AD HOC NEWS' },
+  { ...event, eventKey: 'h3', title: 'AWSX der Telegram-Trader.de: Almonty Ind.: Wolfram-Produktion startet - wird Sangdong zum China-Gegengewicht?', source: 'Telegram-Trader.de' },
+];
+const badHeadlines = headlineEvents.map(e => e.title).join('. ');
+const goodSynthesis = 'Almonty has resolved legal uncertainty in Ontario while restarting its Korean tungsten operations. Other reports describe supply concerns and the start of production at Sangdong.';
+const { checkSummaryQuality } = require('../lib/newsLageSummary');
+test('headline concatenation and lightly edited headline lists are rejected', () => {
+  assert.equal(checkSummaryQuality(badHeadlines, headlineEvents).valid, false);
+  const edited = 'A tungsten price shock signals a deeper supply crisis. Almonty ends legal ambiguity in Ontario while restarting Korean tungsten output.';
+  assert.equal(checkSummaryQuality(edited, headlineEvents).valid, false);
+});
+test('coherent synthesis and the previously verified EU output pass despite shared factual terms', () => {
+  assert.equal(checkSummaryQuality(goodSynthesis, headlineEvents).valid, true);
+  const events = [
+    { title: 'Almonty Ships First Tungsten Concentrate From Sangdong as Rwanda Deal Widens Its Supply Base - AD HOC NEWS', source: 'AD HOC NEWS' },
+    { title: 'VKA produces 69.3% tungsten concentrate at US project - Next Investors', source: 'Next Investors' },
+    { title: 'Canadian Gold Mountain considers restarting tungsten mine in Brazil that operated during the Second World War - BNamericas', source: 'BNamericas' },
+  ];
+  const eu = 'Almonty shipped its first tungsten concentrate from Sangdong, restarting Korean output. A US project produced 69.3% tungsten concentrate. Canadian Gold Mountain plans to restart a WWII-era tungsten mine in Brazil.';
+  assert.equal(checkSummaryQuality(eu, events).valid, true);
+});
+test('copied publisher labels and headline questions are rejected', () => {
+  assert.equal(checkSummaryQuality('Almonty restarted production — AD HOC NEWS. The mine is shipping concentrate.', [{title:'Almonty restarted production — AD HOC NEWS',source:'AD HOC NEWS'}]).valid, false);
+  assert.equal(checkSummaryQuality('Will Sangdong become a counterweight to China? Almonty reported its first shipment.', [{title:'Will Sangdong become a counterweight to China?'}]).valid, false);
+});
+test('headline output is not cached and uses the existing fallback without retries', async () => {
+  const fs = require('node:fs'); const os = require('node:os'); const path = require('node:path');
+  const { NewsClassificationCache } = require('../lib/newsClassificationCache');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'summary-quality-'));
+  try {
+    const cache = new NewsClassificationCache({directory,model:'local',schemaVersion:'test'});
+    const input = fixture();
+    input.events.china = headlineEvents.slice(0,2);
+    input.managementSummary.china.topEvents = input.events.china;
+    input.managementSummary.eu.status = 'empty';
+    const bad = 'The Tungsten Price Shock Signals Deeper Supply Crisis. Almonty Ends Legal Ambiguity in Ontario While Restarting Korean Tungsten Output.';
+    let calls = 0;
+    const result = await summarizeNewsLage(input, {cache,fetch:async()=>{calls++;return {ok:true,json:async()=>({message:{content:JSON.stringify({summary:bad})}})};}});
+    assert.match(result.managementSummary.china.text, /^The selected reports cover/);
+    assert.equal(calls,1);
+    assert.deepEqual(cache.entries,{});
+    assert.equal(fs.existsSync(cache.file),false);
+  } finally { fs.rmSync(directory,{recursive:true,force:true}); }
+});
+test('cached headline output is revalidated against the selected titles', async () => {
+  const input=fixture(); input.events.china=headlineEvents; input.managementSummary.china.topEvents=headlineEvents;input.managementSummary.eu.status='empty';
+  let calls=0;
+  const result=await summarizeNewsLage(input,{cache:{get:()=>({summary:'The Tungsten Price Shock Signals Deeper Supply Crisis. Almonty Ends Legal Ambiguity in Ontario While Restarting Korean Tungsten Output.'}),set(){}},fetch:async()=>{calls++;return {ok:true,json:async()=>({message:{content:JSON.stringify({summary:goodSynthesis})}})};}});
+  assert.equal(calls,1);
+  assert.equal(result.managementSummary.china.text,goodSynthesis);
+});
