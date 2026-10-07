@@ -47,6 +47,7 @@ const { deduplicateEvents } = require("./lib/newsEventDedup");
 const { buildEventEvidence } = require("./lib/newsEventEvidence");
 const { persistValidatedEvents } = require("./lib/newsEventPersistence");
 const { loadNewsLageV2 } = require("./lib/newsLageV2");
+const { summarizeNewsLage } = require("./lib/newsLageSummary");
 const { loadStrategicMarketIntelligence } = require("./lib/strategicMarketIntelligenceIntegration");
 const { loadHistoricalEventOutcomeAssociations } = require("./lib/eventOutcomeAggregation");
 const { refreshPendingEventOutcomes } = require("./lib/eventOutcomePendingRefresh");
@@ -552,9 +553,10 @@ app.post("/api/refresh", async (req, res) => {
     // forecasting, Fusion, stress scenarios, and the legacy currentMarket API.
     const newsLageStartedAt = performance.now();
     console.info("[refresh]", JSON.stringify({ timestamp: new Date().toISOString(), stage: "sqlite_news_lage_readback", outcome: "start" }));
-    const newsLage = loadNewsLageV2({
+    const newsLage = await summarizeNewsLage(loadNewsLageV2({
       databasePath: path.join(appDir, "data", "news-events.db"),
-    });
+    }), { fetch, baseUrl: OLLAMA_BASE_URL, model: OLLAMA_MODEL,
+      timeoutMs: OLLAMA_TIMEOUT_MS, cache: classificationCache });
     console.info("[refresh]", JSON.stringify({
       timestamp: new Date().toISOString(), stage: "sqlite_news_lage_readback", outcome: "success",
       durationMs: Math.round(performance.now() - newsLageStartedAt),

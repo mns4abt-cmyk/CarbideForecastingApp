@@ -1,80 +1,87 @@
 "use strict";
-const test = require("node:test");
-const assert = require("node:assert/strict");
-const { buildNewsLageSummary } = require("../lib/newsLageSummary");
-const closing = "The statistical price forecast is not adjusted by this news assessment.";
-const sparse = "This assessment currently rests on a small number of validated directional events.";
-function input(overrides = {}) {
-  return { qualitativeLabel: "bullish", sentimentScore: 45, totalEventCount: 8, directionalEventCount: 4,
-    topEvents: [{ category: "supply" }, { category: "regulation" }], ...overrides };
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { buildNewsLageSummary, summarizeNewsLage } = require('../lib/newsLageSummary');
+const event = { eventKey: 'a', title: 'Mine nimmt Wolframproduktion wieder auf', snippet: 'Die Verarbeitung wurde wieder aufgenommen.', source: 'Minenbericht', publishedAt: '2026-10-04', category: 'supply', direction: 'bearish', supplyEffect: 'increase', demandEffect: 'none', eventStage: 'actual', evidenceMaturity: 'realized', effectiveMarketRelevance: 0.8, finalWeight: 99, P50: 123 };
+function fixture() {
+  return { available: true, china: { sentimentScore: 42 }, eu: { sentimentScore: -42 }, events: { china: [event], eu: [{ ...event, eventKey: 'b', title: 'EU führt neue Exportregeln ein' }] }, managementSummary: { china: { status: 'available', topEvents: [event], text: 'old', additionalLlmCalls: false }, eu: { status: 'available', topEvents: [{ ...event, eventKey: 'b', title: 'EU führt neue Exportregeln ein' }], text: 'old', additionalLlmCalls: false } } };
 }
-
-test("bullish/bearish/balanced wording follows the supplied label, never the score or titles", () => {
-  for (const [qualitativeLabel, phrase] of [
-    ["bullish", "predominantly bullish"], ["bearish", "predominantly bearish"],
-    ["neutral/ausgeglichen", "neutral/balanced"],
-    ["stark bullish", "strongly bullish"], ["stark bearish", "strongly bearish"],
-  ]) {
-    const data = input({ qualitativeLabel, sentimentScore: -99,
-      topEvents: [{ category: "supply", title: "Company promises prices will soar", direction: "bearish" }] });
-    const summary = buildNewsLageSummary(data);
-    assert.ok(summary.includes(`The news assessment is ${phrase} for tungsten/APT price pressure.`));
-    assert.ok(!summary.includes("Company"));
-    assert.ok(!summary.includes("soar"));
-    assert.equal(summary, buildNewsLageSummary({ ...data, sentimentScore: 99 }));
+const valid = 'The mine has resumed tungsten production. Processing operations have also restarted.';
+test('fallback uses content and ignores aggregate scores', () => {
+  const input = { topEvents: [event], sentimentScore: 42 };
+  assert.match(buildNewsLageSummary(input), /Mine nimmt Wolframproduktion/);
+  assert.equal(buildNewsLageSummary(input), buildNewsLageSummary({ ...input, sentimentScore: -99 }));
+  assert.match(buildNewsLageSummary({ topEvents: [] }), /No selected/);
+  for (const input of [null, {}, { topEvents: null }]) assert.match(buildNewsLageSummary(input), /No selected/);
+});
+test('separate selected event payloads are allowlisted; only summary metadata/text changes', async () => {
+  const original = fixture();
+  const before = structuredClone(original);
+  const payloads = [];
+  const result = await summarizeNewsLage(original, { fetch: async (url, options) => {
+    payloads.push(JSON.parse(options.body));
+    return { ok: true, json: async () => ({ message: { content: JSON.stringify({ summary: valid }) } }) };
+  } });
+  assert.equal(payloads.length, 2);
+  assert.deepEqual(payloads[0].messages.at(-1), { role: "assistant", content: "<think>\n\n</think>\n\n" });
+  assert.match(payloads[0].messages[0].content, /Mine nimmt/);
+  assert.doesNotMatch(payloads[0].messages[0].content, /EU führt/);
+  assert.match(payloads[1].messages[0].content, /EU führt/);
+  const sent = JSON.parse(payloads[0].messages[0].content.split('EVENTS:\n')[1].split('\n\n')[0]).events[0];
+  assert.deepEqual(Object.keys(sent).sort(), ['title','snippet','source','publishedAt','category','direction','supplyEffect','demandEffect','eventStage','evidenceMaturity','marketRelevance'].sort());
+  assert.equal(sent.supplyEffect, 'increase');
+  assert.equal(result.managementSummary.china.text, valid);
+  for (const market of ['china', 'eu']) {
+    assert.equal(result.managementSummary[market].additionalLlmCalls, true);
+    result.managementSummary[market].text = before.managementSummary[market].text;
+    result.managementSummary[market].additionalLlmCalls = false;
   }
+  assert.deepEqual(result, before);
+  assert.deepEqual(original, before);
 });
-test("zero events and zero directional events are distinguished without inventing neutral labels", () => {
-  assert.equal(buildNewsLageSummary(input({ totalEventCount: 0, directionalEventCount: 0 })),
-    `No validated events are available for the 30-day assessment. ${closing}`);
-  const summary = buildNewsLageSummary(input({ directionalEventCount: 0 }));
-  assert.equal(summary, `Validated events are available, but no clear directional assessment is supported. ${closing}`);
-  assert.ok(!summary.includes("bullish"));
-});
-test("one and two directional events trigger wording only; three or more do not", () => {
-  for (const directionalEventCount of [1, 2, 3, 4]) {
-    const summary = buildNewsLageSummary(input({ directionalEventCount }));
-    assert.equal(summary.includes(sparse), directionalEventCount <= 2);
-    assert.ok(summary.includes("predominantly bullish"));
+test('unavailable, malformed, technical, forecast and timed-out replies fall back independently', async () => {
+  for (const reply of [null, JSON.stringify({ summary: 'The mine has resumed production. Prices will rise next month.' }), JSON.stringify({ summary: 'The mine has resumed production. This leads to higher supply.' }), JSON.stringify({ summary: 'The mine has resumed production. Market relevance is 0.8.' }), '{"summary":"Die Mine liefert Konzentrat. Die EU-Relevanz liegt bei 0,105."}', '{"summary":"Die Mine liefert Konzentrat. Diese Ereignisse führen zu einem Anstieg der Versorgung."}', '{}', '{"summary":""}', '{"summary":"finalWeight ist hoch. Der Preis wird steigen."}', '{"summary":"Die Mine hat die Produktion wieder aufgenommen. Die Verarbeitung läuft wieder."}']) {
+    const result = await summarizeNewsLage(fixture(), { fetch: async () => {
+      if (reply === null) throw Error('offline');
+      return { ok: true, json: async () => ({ message: { content: reply } }) };
+    } });
+    assert.match(result.managementSummary.china.text, /Mine nimmt/);
+    assert.match(result.managementSummary.eu.text, /EU führt/);
   }
+  const result = await summarizeNewsLage(fixture(), { timeoutMs: 5, fetch: async () => new Promise(() => {}) });
+  assert.match(result.managementSummary.china.text, /Mine nimmt/);
 });
-test("missing, unavailable or invalid essential inputs are insufficient, not neutral", () => {
-  for (const data of [undefined, null, {}, input({ qualitativeLabel: "unavailable" }),
-    input({ qualitativeLabel: "unknown" }), input({ sentimentScore: null }),
-    input({ sentimentScore: NaN }), input({ totalEventCount: null }),
-    input({ directionalEventCount: undefined }), input({ directionalEventCount: 9 }),
-    input({ totalEventCount: -1 }), input({ directionalEventCount: 1.5 })]) {
-    assert.equal(buildNewsLageSummary(data), `There is insufficient information for a directional news assessment. ${closing}`);
-  }
+test('cache reuses validated output but invalidates changed content and model', async () => {
+  const { NewsClassificationCache } = require('../lib/newsClassificationCache');
+  const fs = require('node:fs'); const os = require('node:os'); const path = require('node:path');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'summary-test-'));
+  try {
+    const cache = new NewsClassificationCache({ directory, model: 'local', schemaVersion: 'test' });
+    let calls = 0;
+    const options = { cache, fetch: async () => { calls++; return { ok: true, json: async () => ({ message: { content: JSON.stringify({ summary: valid }) } }) }; } };
+    await summarizeNewsLage(fixture(), options);
+    await summarizeNewsLage(fixture(), options);
+    assert.equal(calls, 2);
+    const changed = fixture(); changed.events.china[0] = { ...event, snippet: 'Neue Details' };
+    await summarizeNewsLage(changed, options);
+    assert.equal(calls, 3);
+    await summarizeNewsLage(fixture(), { ...options, model: 'other' });
+    assert.equal(calls, 5);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
-test("up to three known categories are deduplicated in supplied ranking order", () => {
-  const summary = buildNewsLageSummary(input({ topEvents: [
-    { category: "regulation" }, { category: "supply" }, { category: "regulation" },
-    null, { category: "<script>unknown</script>" }, { category: "demand" }, { category: "technology" },
-  ] }));
-  assert.ok(summary.includes("Among the selected events, regulation, supply and demand are most prominent."));
-  assert.ok(!summary.includes("technology"));
-  assert.ok(!summary.includes("script"));
-  assert.ok(buildNewsLageSummary(input({ topEvents: [{ category: "supply" }] }))
-    .includes("Among the selected events, supply is most prominent."));
-  for (const topEvents of [[], null, {}, [{ category: "unknown" }]]) {
-    assert.ok(!buildNewsLageSummary(input({ topEvents })).includes("most prominent"));
-  }
-});
-test("all branches produce 2–4 sentences ending with the required forecast disclaimer", () => {
-  for (const data of [undefined, input(), input({ directionalEventCount: 1 }),
-    input({ directionalEventCount: 2, topEvents: [] }), input({ directionalEventCount: 0 }),
-    input({ totalEventCount: 0, directionalEventCount: 0 })]) {
-    const summary = buildNewsLageSummary(data);
-    const sentences = summary.split(/[.!?]+/).filter(s => s.trim());
-    assert.ok(sentences.length >= 2 && sentences.length <= 4);
-    assert.ok(summary.endsWith(closing));
-  }
-});
-test("output is deterministic and inputs remain unchanged", () => {
-  const data = input({ directionalEventCount: 2 });
-  const before = structuredClone(data);
-  const first = buildNewsLageSummary(data);
-  assert.equal(buildNewsLageSummary(data), first);
-  assert.deepEqual(data, before);
+test('one market failure does not suppress the other market; empty/unavailable never call Ollama', async () => {
+  let calls = 0;
+  const options = { fetch: async () => {
+    if (++calls === 1) throw Error('offline');
+    return { ok: true, json: async () => ({ message: { content: JSON.stringify({ summary: valid }) } }) };
+  } };
+  const result = await summarizeNewsLage(fixture(), options);
+  assert.match(result.managementSummary.china.text, /Mine nimmt/);
+  assert.equal(result.managementSummary.eu.text, valid);
+  const unavailable = fixture(); unavailable.available = false;
+  assert.deepEqual(await summarizeNewsLage(unavailable, options), unavailable);
+  const empty = fixture();
+  for (const market of ['china','eu']) empty.managementSummary[market].status = 'empty';
+  assert.deepEqual(await summarizeNewsLage(empty, options), empty);
+  assert.equal(calls, 2);
 });
