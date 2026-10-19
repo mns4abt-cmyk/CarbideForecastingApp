@@ -47,6 +47,7 @@ const { deduplicateEvents } = require("./lib/newsEventDedup");
 const { buildEventEvidence } = require("./lib/newsEventEvidence");
 const { persistValidatedEvents } = require("./lib/newsEventPersistence");
 const { loadNewsLageV2 } = require("./lib/newsLageV2");
+const { addOllamaNewsLageSummaries } = require("./lib/newsLageOllamaSummary");
 const { loadStrategicMarketIntelligence } = require("./lib/strategicMarketIntelligenceIntegration");
 const { loadHistoricalEventOutcomeAssociations } = require("./lib/eventOutcomeAggregation");
 const { refreshPendingEventOutcomes } = require("./lib/eventOutcomePendingRefresh");
@@ -555,6 +556,19 @@ app.post("/api/refresh", async (req, res) => {
     const newsLage = loadNewsLageV2({
       databasePath: path.join(appDir, "data", "news-events.db"),
     });
+    const managementNewsLage = await addOllamaNewsLageSummaries(newsLage, {
+      fetch: LLM_PROVIDER === "ollama" ? fetch : null,
+      articleContent: eventDeduplication.representatives.map(article => ({
+        title: article.title,
+        snippet: article.snippet,
+        source: article.source,
+        publishedAt: article.date,
+      })),
+      baseUrl: OLLAMA_BASE_URL,
+      model: OLLAMA_MODEL,
+      timeoutMs: Math.max(30000, Math.min(45000, OLLAMA_TIMEOUT_MS)),
+      available: LLM_PROVIDER === "ollama" && aiProvider.available,
+    });
     console.info("[refresh]", JSON.stringify({
       timestamp: new Date().toISOString(), stage: "sqlite_news_lage_readback", outcome: "success",
       durationMs: Math.round(performance.now() - newsLageStartedAt),
@@ -649,7 +663,7 @@ app.post("/api/refresh", async (req, res) => {
       scenarios,
       news,
       eventEvidence,
-      newsLage,
+      newsLage: managementNewsLage,
       historicalEventAssociations,
       evidenceFusion,
       newsDiagnostics,

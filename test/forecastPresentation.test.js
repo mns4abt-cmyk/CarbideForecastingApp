@@ -15,6 +15,17 @@ test("market-specific unit display uses native units and the Both index", () => 
   assert.equal(presentation.nonNegativeAxisMinimum(-12, false), -12);
 });
 
+test("market switching uses the correct main-chart Y-axis labels", () => {
+  assert.equal(presentation.chartYAxisLabelForRegion("china"), "Preis (CNY/kg APT)");
+  assert.equal(presentation.chartYAxisLabelForRegion("eu"), "Preis (USD/mtu WO₃)");
+  assert.equal(presentation.chartYAxisLabelForRegion("both"), "Index (Heute = 100)");
+
+  const app = fs.readFileSync(path.join(__dirname, "..", "public", "js", "app.js"), "utf8");
+  const chart = fs.readFileSync(path.join(__dirname, "..", "public", "js", "chart.js"), "utf8");
+  assert.match(app, /chartYAxisLabelForRegion\(state\.region\)/);
+  assert.match(chart, /yAxisTitle\.textContent = cfg\.yAxisLabel \|\| unit/);
+});
+
 test("scenario presentation keeps absolute changes unchanged and derives percentage-point deltas", () => {
   const baseline = { id: "base", expectedChange12m: { china: -2.5, eu: -51.0 } };
   const scenario = { id: "supplyShock", expectedChange12m: { china: 5.5, eu: -38.0 } };
@@ -27,6 +38,48 @@ test("scenario presentation keeps absolute changes unchanged and derives percent
   assert.equal(presentation.shouldShowScenarioDelta(baseline), false);
   assert.equal(presentation.shouldShowScenarioDelta(scenario), true);
   assert.deepEqual(scenario, before);
+});
+
+test("China native-price axis starts at zero and rounds the visible maximum upward", () => {
+  const bounds = presentation.chartYAxisBounds({ series: [{ data: [2980, 3140, 3015] }] });
+  assert.deepEqual(bounds, { min: 0, max: 3500 });
+});
+
+test("EU native-price axis includes a P90 maximum and uses a clean ceiling", () => {
+  const bounds = presentation.chartYAxisBounds({
+    series: [{ data: [610, 657] }],
+    bands: [{ p10: [590, 600], p50: [620, 640], p90: [650, 657] }],
+  });
+  assert.deepEqual(bounds, { min: 0, max: 750 });
+});
+
+test("historical-only native chart ignores absent forecasts while retaining zero minimum", () => {
+  assert.deepEqual(presentation.chartYAxisBounds({ series: [{ data: [500, 540, 560] }], bands: [] }),
+    { min: 0, max: 750 });
+});
+
+test("visible scenario values expand the native price chart while hidden scenarios do not", () => {
+  const historical = [{ data: [600, 650] }];
+  assert.deepEqual(presentation.chartYAxisBounds({ series: [...historical, { data: [650, 900] }] }),
+    { min: 0, max: 1000 });
+  assert.deepEqual(presentation.chartYAxisBounds({ series: historical }), { min: 0, max: 750 });
+});
+
+test("native price bounds handle near-zero, null, and invalid values without clipping finite data", () => {
+  assert.deepEqual(presentation.chartYAxisBounds({ series: [{ data: [0, 0.004, null, NaN, Infinity] }] }),
+    { min: 0, max: 0.005 });
+  assert.deepEqual(presentation.chartYAxisBounds({ series: [{ data: [null, NaN, Infinity] }] }),
+    { min: 0, max: 1 });
+});
+
+test("Both mode keeps index data on an independently padded index axis", () => {
+  const bounds = presentation.chartYAxisBounds({
+    indexMode: true,
+    series: [{ data: [90, 100, 105] }, { data: [95, 100, 102] }],
+    bands: [{ p10: [null, 97, 98], p50: [null, 100, 102], p90: [null, 104, 106] }],
+  });
+  assert.deepEqual(bounds, { min: 85, max: 110 });
+  assert.notEqual(bounds.min, 0);
 });
 
 test("frontend copy identifies historical stress calibration and separate news interpretation", () => {

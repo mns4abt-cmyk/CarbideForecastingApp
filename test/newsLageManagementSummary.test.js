@@ -36,21 +36,21 @@ test("populated summaries retain independent market labels/counts, select five e
     assert.equal(summary.directionalEventCount, result[market].directionalEventCount);
     assert.equal(summary.topEvents.length, 5);
     assert.ok(summary.topEvents.every(e => e.eventKey.startsWith(market)));
-    assert.ok(summary.text.includes(market === "china" ? "bullish" : "bearish"));
+    assert.ok(summary.text.includes(`${market} event`));
     assert.equal(summary.generatedFrom, "validated_30d_events");
     assert.equal(summary.additionalLlmCalls, false);
     assert.equal(summary.numericalForecastAdjustmentApplied, false);
   }
 });
-test("sparse and empty states use existing deterministic wording", (t) => {
+test("sparse and empty states use selected article content or disclose missing content", (t) => {
   const sparse = setup(t).load();
-  assert.ok(sparse.managementSummary.china.text.includes("small number"));
+  assert.match(sparse.managementSummary.china.text, /china event 0/);
   const empty = setup(t, 0).load();
   for (const market of ["china", "eu"]) {
     assert.equal(empty.managementSummary[market].status, "empty");
     assert.equal(empty.managementSummary[market].totalEventCount, 0);
     assert.deepEqual(empty.managementSummary[market].topEvents, []);
-    assert.ok(empty.managementSummary[market].text.includes("No validated events"));
+    assert.ok(empty.managementSummary[market].text.includes("nicht genügend Artikeldaten"));
   }
 });
 test("unavailable DB yields unavailable summaries with null counts", () => {

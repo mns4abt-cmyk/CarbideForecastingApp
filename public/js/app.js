@@ -218,13 +218,15 @@
     const unit = state.region === "eu" ? "USD/mtu WO3"
       : state.region === "china" ? "CNY/kg APT"
       : "Index (Today = 100)";
+    const yAxisLabel = window.ForecastPresentation.chartYAxisLabelForRegion(state.region);
     window.renderPriceChart(els.chartSvg, els.chartTooltip, {
       labels: ALL_LABELS,
       historyCount: HIST_COUNT,
       series,
       bands,
       unit,
-      nonNegativeAxis: state.region === "both",
+      yAxisLabel,
+      indexMode: state.region === "both",
     });
     renderLegend(series);
   }

@@ -14,7 +14,7 @@
   /**
    * @param {SVGSVGElement} svg
    * @param {HTMLElement} tooltipEl
-   * @param {object} cfg { labels, historyCount, series:[{id,label,color,dashed,data[]}], unit, nonNegativeAxis,
+  * @param {object} cfg { labels, historyCount, series:[{id,label,color,dashed,data[]}], unit, yAxisLabel, indexMode,
    *                        bands:[{id,regionLabel,color,p10[],p50[],p90[]}] }
    */
   function renderPriceChart(svg, tooltipEl, cfg) {
@@ -24,7 +24,7 @@
     const height = svg.clientHeight || 380;
     svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
 
-    const margin = { top: 18, right: 24, bottom: 34, left: 56 };
+    const margin = { top: 18, right: 24, bottom: 34, left: 78 };
     const innerW = width - margin.left - margin.right;
     const innerH = height - margin.top - margin.bottom;
 
@@ -32,32 +32,25 @@
     const bands = cfg.bands || [];
     const n = labels.length;
 
-    // Y-Skala über alle sichtbaren, nicht-null Werte (Linien UND Unsicherheitsbänder)
-    let min = Infinity, max = -Infinity;
-    series.forEach((s) => {
-      s.data.forEach((v) => {
-        if (v === null || v === undefined) return;
-        if (v < min) min = v;
-        if (v > max) max = v;
-      });
+    // Series and bands are built from enabled controls only. Native price axes
+    // start at zero; the index comparison chart keeps its own padded domain.
+    const { min, max } = window.ForecastPresentation.chartYAxisBounds({
+      series, bands, indexMode: cfg.indexMode,
     });
-    bands.forEach((b) => {
-      [...b.p10, ...b.p90].forEach((v) => {
-        if (v === null || v === undefined) return;
-        if (v < min) min = v;
-        if (v > max) max = v;
-      });
-    });
-    if (!isFinite(min)) { min = 0; max = 1; }
-    const pad = (max - min) * 0.12 || max * 0.1 || 1;
-    min -= pad; max += pad;
-    min = window.ForecastPresentation.nonNegativeAxisMinimum(min, cfg.nonNegativeAxis);
 
     const x = (i) => margin.left + (innerW * i) / (n - 1);
     const y = (v) => margin.top + innerH - ((v - min) / (max - min)) * innerH;
 
     const root = el("g", {});
     svg.appendChild(root);
+
+    const yAxisTitle = el("text", {
+      x: 18, y: margin.top + innerH / 2, "text-anchor": "middle",
+      class: "chart-axis-title",
+      transform: `rotate(-90 18 ${margin.top + innerH / 2})`,
+    });
+    yAxisTitle.textContent = cfg.yAxisLabel || unit;
+    root.appendChild(yAxisTitle);
 
     // Gridlines + Y-Achsenbeschriftung
     const gridCount = 5;
@@ -103,10 +96,10 @@
     bands.forEach((b) => {
       const topPts = [];
       const bottomPts = [];
-      b.p90.forEach((v, i) => { if (v !== null && v !== undefined) topPts.push(`${x(i)},${y(v)}`); });
+      b.p90.forEach((v, i) => { if (Number.isFinite(v)) topPts.push(`${x(i)},${y(v)}`); });
       for (let i = b.p10.length - 1; i >= 0; i--) {
         const v = b.p10[i];
-        if (v !== null && v !== undefined) bottomPts.push(`${x(i)},${y(v)}`);
+        if (Number.isFinite(v)) bottomPts.push(`${x(i)},${y(v)}`);
       }
       if (topPts.length < 2 || bottomPts.length < 2) return;
       root.appendChild(el("polygon", {
@@ -119,7 +112,7 @@
     series.forEach((s) => {
       const pts = [];
       s.data.forEach((v, i) => {
-        if (v === null || v === undefined) return;
+        if (!Number.isFinite(v)) return;
         pts.push(`${x(i)},${y(v)}`);
       });
       if (pts.length < 2) return;

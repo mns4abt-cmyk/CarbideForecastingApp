@@ -35,6 +35,7 @@ function refreshResponse(appDir, loader = loadStrategicMarketIntelligence) {
       eu: { p10: [15], p50: [21], p90: [25] } },
     scenarios: [{ id: "base", china: [11], eu: [21] }], news: [{ title: "unchanged" }],
     eventEvidence: [{ eventId: "event-1" }], newsLage: { sentiment: 0.3 },
+    managementNewsLage: { sentiment: 0.3 },
     historicalEventAssociations: { groups: [] }, evidenceFusion: { status: "unchanged" },
     newsDiagnostics: { fetched: 1 }, marketState: { china: { overall: 0.1 } },
   };

@@ -138,7 +138,8 @@ test("News-Lage v2 database failures are unavailable but non-throwing", () => {
 test("refresh wires News-Lage v2 after persistence without feeding Fusion or scenarios", () => {
   const source = fs.readFileSync(path.join(__dirname, "..", "server.js"), "utf8");
   assert.match(source, /const newsLage = loadNewsLageV2\(\{/);
-  assert.match(source, /newsLage,/);
+  assert.match(source, /newsLage: managementNewsLage/);
+  assert.match(source, /addOllamaNewsLageSummaries\(newsLage/);
   assert.ok(source.indexOf("persistValidatedEvents(eventEvidence") < source.indexOf("const newsLage = loadNewsLageV2"));
   const newsLageCall = source.match(/const newsLage = loadNewsLageV2\(\{[\s\S]*?\}\);/)?.[0] || "";
   assert.doesNotMatch(newsLageCall, /pipelineResult|scenarios|marketState|evidenceFusion/);

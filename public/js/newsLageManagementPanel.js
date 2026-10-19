@@ -8,9 +8,9 @@
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   })[c]);
   const number = (value) => Number.isFinite(value) ? escape(value) : 'Nicht verfügbar';
-  function eventList(events, technical = false) {
+  function eventList(events, start = 1) {
     if (!events.length) return '<p>Keine gewichteten Top-Ereignisse verfügbar.</p>';
-    return `<ol class="news-management-events">${events.map((event) => {
+    return `<ol class="news-management-events" start="${start}">${events.map((event) => {
       const date = event.date ? new Date(event.date) : null;
       const dateText = date && Number.isFinite(date.getTime())
         ? date.toLocaleDateString('de-DE', { timeZone: 'UTC' }) : 'Datum nicht verfügbar';
@@ -19,7 +19,7 @@
         <span>${escape(source)}</span>
         <span>Wolfram/APT-Preisdruck: ${escape(event.direction || 'Nicht verfügbar')}</span>
         <span>${[event.category, event.eventStage, event.evidenceMaturity].filter(Boolean).map(escape).join(' · ')}</span>
-        ${technical ? `<small>finalWeight: ${number(event.finalWeight)}</small>` : ''}</li>`;
+        </li>`;
     }).join('')}</ol>`;
   }
   function marketPanel(newsLage, market) {
@@ -30,9 +30,9 @@
     const events = usable && Array.isArray(summary.topEvents) ? summary.topEvents.slice(0, 5) : [];
     return `<section class="news-management-market" data-market="${market}">
       <h3>${market === 'china' ? 'China' : 'EU'}</h3>
-      <h4>Kurzfazit</h4>
-      <p class="news-management-summary">${escape(summary?.text || 'Management-Zusammenfassung derzeit nicht verfügbar.')}</p>
-      ${!usable ? '<p role="status">Management-Zusammenfassung derzeit nicht verfügbar.</p>'
+      <h4>Nachrichtenüberblick</h4>
+      <p class="news-management-summary">${escape(summary?.text || 'Nachrichtenüberblick derzeit nicht verfügbar.')}</p>
+      ${!usable ? '<p role="status">Nachrichtenüberblick derzeit nicht verfügbar.</p>'
         : empty ? '<p role="status">Keine validierten Ereignisse im gewählten Zeitraum.</p>'
           : sparse ? '<p class="news-management-status">Kleine Datenbasis: 1–2 gerichtete Ereignisse.</p>' : ''}
       <h4>Aktuelle Einordnung</h4>
@@ -40,10 +40,11 @@
       <dl class="news-management-counts"><div><dt>Validierte Ereignisse</dt><dd>${number(usable ? summary.totalEventCount : null)}</dd></div>
         <div><dt>Gerichtete Ereignisse</dt><dd>${number(usable ? summary.directionalEventCount : null)}</dd></div></dl>
       <h4>Top-Ereignisse</h4>${usable ? eventList(events.slice(0, 3)) : '<p>Top-Ereignisse nicht verfügbar.</p>'}
+      ${usable && events.length > 3 ? `<details class="news-lage-more-events"><summary>Weitere Ereignisse anzeigen</summary>${eventList(events.slice(3), 4)}</details>` : ''}
+      <p class="news-management-status">Die Rangfolge ist je Markt anhand der bestehenden marktbezogenen Gewichtung sortiert. Ein Ereignis kann in beiden Märkten erscheinen, wenn es sowohl für China als auch für die EU relevant ist.</p>
       <details class="news-lage-details"><summary>Methodik / Details anzeigen</summary>
         <p>${methodology}</p>
         <p>Sentiment Score: ${number(usable ? newsLage?.[market]?.sentimentScore : null)}</p>
-        <h4>Alle ausgewählten Top-Ereignisse</h4>${usable ? eventList(events, true) : '<p>Nicht verfügbar.</p>'}
       </details>
     </section>`;
   }

@@ -43,7 +43,7 @@ test("uses existing date precedence and returns only UI fields with detached sou
   const result = selectTopEvents(input);
   assert.deepEqual(result, [{ eventKey: "fallback", date: "2026-10-02T00:00:00.000Z",
     title: "fallback", source: "Publisher A", provenance: { sources: ["Publisher A", "Publisher B"] },
-    direction: "bullish", category: "supply", eventStage: "actual", evidenceMaturity: "realized", finalWeight: 0.1 }]);
+    direction: "bullish", category: "supply", eventStage: "actual", evidenceMaturity: "realized", effectiveMarketRelevance: 0.2, finalWeight: 0.1 }]);
   assert.deepEqual(input, before);
   result[0].provenance.sources.push("changed");
   assert.deepEqual(input, before);
@@ -64,3 +64,26 @@ test("persisted 30-day details expose canonical key without changing event recor
     assert.deepEqual(store.getAllEvents(), before);
   } finally { store.close(); }
 });
+
+test("same events rank independently by existing China and EU market relevance", () => {
+  const store = new NewsEventStore({ databasePath: ":memory:" });
+  try {
+    for (const [eventKey, chinaRelevance, euRelevance] of [
+      ["china-led", 0.9, 0.2], ["eu-led", 0.2, 0.9],
+    ]) {
+      store.upsert({ eventId: eventKey, headline: `${eventKey} tungsten supply`, category: "supply",
+        direction: "bullish", supplyEffect: "decrease", demandEffect: "none", eventStage: "actual",
+        evidenceMaturity: "realized", severity: 0.8, confidence: 0.9, globalRelevance: 0.2,
+        chinaRelevance, euRelevance, horizonWeeks: 12,
+      }, { eventKey, date: "2026-10-01", source: "Publisher" });
+    }
+    const referenceTime = "2026-10-02T00:00:00Z";
+    const china = selectTopEvents(store.getRecentEventDetails({ market: "china", referenceTime }));
+    const eu = selectTopEvents(store.getRecentEventDetails({ market: "eu", referenceTime }));
+    assert.deepEqual(china.map(event => event.eventKey), ["china-led", "eu-led"]);
+    assert.deepEqual(eu.map(event => event.eventKey), ["eu-led", "china-led"]);
+    assert.ok(china[0].effectiveMarketRelevance > china[1].effectiveMarketRelevance);
+    assert.ok(eu[0].effectiveMarketRelevance > eu[1].effectiveMarketRelevance);
+  } finally { store.close(); }
+});
+

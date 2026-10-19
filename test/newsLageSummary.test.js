@@ -2,79 +2,40 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { buildNewsLageSummary } = require("../lib/newsLageSummary");
-const closing = "The statistical price forecast is not adjusted by this news assessment.";
-const sparse = "This assessment currently rests on a small number of validated directional events.";
+
 function input(overrides = {}) {
-  return { qualitativeLabel: "bullish", sentimentScore: 45, totalEventCount: 8, directionalEventCount: 4,
-    topEvents: [{ category: "supply" }, { category: "regulation" }], ...overrides };
+  return { totalEventCount: 8, topEvents: [
+    { category: "supply", direction: "bullish", title: "Company promises prices will soar", snippet: "Almonty resumed tungsten output at Sangdong." },
+    { category: "regulation", direction: "bearish", title: "Another long article title", snippet: "European processors report tight concentrate supply." },
+  ], ...overrides };
 }
 
-test("bullish/bearish/balanced wording follows the supplied label, never the score or titles", () => {
-  for (const [qualitativeLabel, phrase] of [
-    ["bullish", "predominantly bullish"], ["bearish", "predominantly bearish"],
-    ["neutral/ausgeglichen", "neutral/balanced"],
-    ["stark bullish", "strongly bullish"], ["stark bearish", "strongly bearish"],
-  ]) {
-    const data = input({ qualitativeLabel, sentimentScore: -99,
-      topEvents: [{ category: "supply", title: "Company promises prices will soar", direction: "bearish" }] });
-    const summary = buildNewsLageSummary(data);
-    assert.ok(summary.includes(`The news assessment is ${phrase} for tungsten/APT price pressure.`));
-    assert.ok(!summary.includes("Company"));
-    assert.ok(!summary.includes("soar"));
-    assert.equal(summary, buildNewsLageSummary({ ...data, sentimentScore: 99 }));
-  }
+test("fallback extracts selected article descriptions instead of aggregate categories or direction counts", () => {
+  const summary = buildNewsLageSummary(input());
+  assert.match(summary, /Almonty resumed tungsten output at Sangdong/);
+  assert.match(summary, /European processors report tight concentrate supply/);
+  assert.doesNotMatch(summary, /Aufwärtsdruck|Abwärtsdruck|Im Fokus standen|bullish|bearish|finalWeight/i);
 });
-test("zero events and zero directional events are distinguished without inventing neutral labels", () => {
-  assert.equal(buildNewsLageSummary(input({ totalEventCount: 0, directionalEventCount: 0 })),
-    `No validated events are available for the 30-day assessment. ${closing}`);
-  const summary = buildNewsLageSummary(input({ directionalEventCount: 0 }));
-  assert.equal(summary, `Validated events are available, but no clear directional assessment is supported. ${closing}`);
-  assert.ok(!summary.includes("bullish"));
+
+test("fallback prefers available snippets and uses article titles only when descriptions are absent", () => {
+  const summary = buildNewsLageSummary(input({ topEvents: [{ title: "Almonty Sangdong production restarts", snippet: "" }] }));
+  assert.match(summary, /Almonty Sangdong production restarts/);
 });
-test("one and two directional events trigger wording only; three or more do not", () => {
-  for (const directionalEventCount of [1, 2, 3, 4]) {
-    const summary = buildNewsLageSummary(input({ directionalEventCount }));
-    assert.equal(summary.includes(sparse), directionalEventCount <= 2);
-    assert.ok(summary.includes("predominantly bullish"));
-  }
+
+test("fallback removes publisher suffixes from selected titles", () => {
+  assert.equal(buildNewsLageSummary(input({ topEvents: [{ title: "Sangdong ships concentrate - Publisher", source: "Publisher" }] })),
+    "Sangdong ships concentrate.");
 });
-test("missing, unavailable or invalid essential inputs are insufficient, not neutral", () => {
-  for (const data of [undefined, null, {}, input({ qualitativeLabel: "unavailable" }),
-    input({ qualitativeLabel: "unknown" }), input({ sentimentScore: null }),
-    input({ sentimentScore: NaN }), input({ totalEventCount: null }),
-    input({ directionalEventCount: undefined }), input({ directionalEventCount: 9 }),
-    input({ totalEventCount: -1 }), input({ directionalEventCount: 1.5 })]) {
-    assert.equal(buildNewsLageSummary(data), `There is insufficient information for a directional news assessment. ${closing}`);
-  }
+
+test("empty and invalid inputs produce a short safe German fallback", () => {
+  assert.match(buildNewsLageSummary(input({ totalEventCount: 0, topEvents: [] })), /nicht genügend Artikeldaten/);
+  assert.match(buildNewsLageSummary(input({ topEvents: [] })), /nicht genügend Artikeldaten/);
+  assert.match(buildNewsLageSummary(null), /nicht genügend Artikeldaten/);
 });
-test("up to three known categories are deduplicated in supplied ranking order", () => {
-  const summary = buildNewsLageSummary(input({ topEvents: [
-    { category: "regulation" }, { category: "supply" }, { category: "regulation" },
-    null, { category: "<script>unknown</script>" }, { category: "demand" }, { category: "technology" },
-  ] }));
-  assert.ok(summary.includes("Among the selected events, regulation, supply and demand are most prominent."));
-  assert.ok(!summary.includes("technology"));
-  assert.ok(!summary.includes("script"));
-  assert.ok(buildNewsLageSummary(input({ topEvents: [{ category: "supply" }] }))
-    .includes("Among the selected events, supply is most prominent."));
-  for (const topEvents of [[], null, {}, [{ category: "unknown" }]]) {
-    assert.ok(!buildNewsLageSummary(input({ topEvents })).includes("most prominent"));
-  }
-});
-test("all branches produce 2–4 sentences ending with the required forecast disclaimer", () => {
-  for (const data of [undefined, input(), input({ directionalEventCount: 1 }),
-    input({ directionalEventCount: 2, topEvents: [] }), input({ directionalEventCount: 0 }),
-    input({ totalEventCount: 0, directionalEventCount: 0 })]) {
-    const summary = buildNewsLageSummary(data);
-    const sentences = summary.split(/[.!?]+/).filter(s => s.trim());
-    assert.ok(sentences.length >= 2 && sentences.length <= 4);
-    assert.ok(summary.endsWith(closing));
-  }
-});
-test("output is deterministic and inputs remain unchanged", () => {
-  const data = input({ directionalEventCount: 2 });
+
+test("fallback is deterministic and does not mutate the input", () => {
+  const data = input();
   const before = structuredClone(data);
-  const first = buildNewsLageSummary(data);
-  assert.equal(buildNewsLageSummary(data), first);
+  assert.equal(buildNewsLageSummary(data), buildNewsLageSummary(data));
   assert.deepEqual(data, before);
 });

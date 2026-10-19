@@ -134,6 +134,7 @@ body {
 .chart-wrap { position: relative; width: 100%; height: 380px; margin-top: 6px; }
 #priceChart { width: 100%; height: 100%; display: block; }
 .chart-axis-label { font-size: 10.5px; fill: #8b94a3; font-family: inherit; }
+.chart-axis-title { font-size: 11px; fill: #6b7789; font-family: inherit; font-weight: 600; }
 .chart-today-label { font-size: 10.5px; fill: #6b7789; font-family: inherit; font-weight: 600; }
 
 .chart-tooltip {
@@ -178,6 +179,8 @@ body {
 .news-lage-details { margin-top: 8px; font-size: 0.76rem; color: var(--text-muted); }
 .news-lage-details summary { cursor: pointer; font-weight: 600; }
 .news-lage-details p { margin: 6px 0 0; }
+.news-lage-more-events { margin: 8px 0 14px; }
+.news-lage-more-events summary { cursor: pointer; font-weight: 600; }
 .news-lage-events { margin-top: 10px; font-size: 0.78rem; }
 .news-lage-events summary { cursor: pointer; font-weight: 700; }
 #newsLageEventsContent { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-top: 10px; }

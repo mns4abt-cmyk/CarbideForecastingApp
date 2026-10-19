@@ -28,16 +28,33 @@ for (const region of ['china', 'eu', 'both']) {
     assert.deepEqual(input, before);
   });
 }
-test('three-event preview, all five in closed details, technical values only in details', () => {
+test('shows ranks one to three once and only ranks four onward behind the collapsed control', () => {
   const html = panel.render({ newsLage: fixture(), region: 'china' });
-  const [primary, details] = html.split('<details');
+  const [primary] = html.split('<details');
+  const additional = html.match(/<details class="news-lage-more-events">([\s\S]*?)<\/details>/)?.[1] || '';
   assert.equal((primary.match(/China event /g) || []).length, 3);
-  assert.equal((details.match(/China event /g) || []).length, 5);
+  assert.match(additional, /<ol class="news-management-events" start="4">/);
+  assert.equal((additional.match(/China event /g) || []).length, 2);
+  assert.ok(additional.includes('China event 4'));
+  assert.ok(additional.includes('China event 5'));
+  assert.ok(!additional.includes('China event 1'));
+  assert.ok(!additional.includes('China event 3'));
+  assert.match(html, /<summary>Weitere Ereignisse anzeigen<\/summary>/);
   assert.doesNotMatch(primary, /77\.123|0\.12345|Sentiment Score/);
-  assert.match(details, /77\.123/);
-  assert.match(details, /0\.12345/);
+  assert.match(html, /77\.123/);
+  assert.doesNotMatch(html, /0\.12345|finalWeight/);
+  assert.match(html, /Nachrichtenüberblick/);
+  assert.doesNotMatch(html, /Kurzfazit/);
+  assert.match(html, /Ein Ereignis kann in beiden Märkten erscheinen, wenn es sowohl für China als auch für die EU relevant ist\./);
   assert.doesNotMatch(html, /<details[^>]*\bopen\b/);
-  assert.match(details, /Die News-Lage basiert auf validierten Nachrichtenereignissen der letzten 30 Tage\. Neuere und materiellere Ereignisse erhalten ein höheres Gewicht\. Der statistische Preisforecast wird dadurch nicht verändert\./);
+  assert.match(html, /Die News-Lage basiert auf validierten Nachrichtenereignissen der letzten 30 Tage\. Neuere und materiellere Ereignisse erhalten ein höheres Gewicht\. Der statistische Preisforecast wird dadurch nicht verändert\./);
+});
+test('does not show the additional-events control when only three events exist', () => {
+  const data = fixture();
+  data.managementSummary.china.topEvents = data.managementSummary.china.topEvents.slice(0, 3);
+  const html = panel.render({ newsLage: data, region: 'china' });
+  assert.doesNotMatch(html, /Weitere Ereignisse anzeigen/);
+  assert.equal((html.match(/China event /g) || []).length, 3);
 });
 test('both mode preserves independent counts and isolates an unavailable market', () => {
   const data = fixture();
