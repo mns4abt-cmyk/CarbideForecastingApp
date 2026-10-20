@@ -7,8 +7,8 @@
 
   const UNITS_BY_REGION = Object.freeze({
     china: "CNY/kg APT",
-    eu: "USD/mtu WO3",
-    both: "Index (Heute = 100)",
+    eu: "USD/mtu WO₃",
+    both: "China: CNY/kg APT | EU: USD/mtu WO₃",
   });
 
   function unitForRegion(region) {
@@ -18,7 +18,16 @@
   function chartYAxisLabelForRegion(region) {
     if (region === "china") return "Preis (CNY/kg APT)";
     if (region === "eu") return "Preis (USD/mtu WO₃)";
-    return "Index (Heute = 100)";
+    return "Getrennte native Preisachsen";
+  }
+
+  // Exactly one chart layout is active: a single native-price market chart or
+  // the two independent native-price charts for the combined view.
+  function chartLayoutForRegion(region) {
+    if (region === "china" || region === "eu") {
+      return { mode: "single", market: region, markets: [region] };
+    }
+    return { mode: "both", market: null, markets: ["china", "eu"] };
   }
 
   function scenarioDeltaPct(scenario, baselineScenario, market) {
@@ -37,6 +46,31 @@
     if (!Number.isFinite(number)) return "";
     const sign = number > 0 ? "+" : "";
     return `vs. Basis: ${sign}${number.toFixed(1)} %-Pkt.`;
+  }
+
+  // Optional overlays never include the historical series or the always-on P50
+  // baseline. The returned state lets one master control reflect individual
+  // uncertainty-, stress-scenario-, and News-scenario controls.
+  function optionalOverlayVisibility({ showUncertaintyBand = true, activeScenarioIds = [], optionalScenarioIds = [] } = {}) {
+    const activeIds = new Set(activeScenarioIds);
+    const optionalIds = [...new Set(optionalScenarioIds)];
+    const visibleCount = (showUncertaintyBand ? 1 : 0)
+      + optionalIds.filter((id) => activeIds.has(id)).length;
+    const total = 1 + optionalIds.length;
+    return {
+      state: visibleCount === total ? "all" : visibleCount === 0 ? "none" : "mixed",
+      visibleCount,
+      total,
+    };
+  }
+
+  function setOptionalOverlaysVisible({ activeScenarioIds = [], optionalScenarioIds = [] } = {}, visible) {
+    const nextActiveIds = new Set(activeScenarioIds);
+    [...new Set(optionalScenarioIds)].forEach((id) => {
+      if (visible) nextActiveIds.add(id);
+      else nextActiveIds.delete(id);
+    });
+    return { showUncertaintyBand: Boolean(visible), activeScenarioIds: nextActiveIds };
   }
 
   function nonNegativeAxisMinimum(minimum, enabled) {
@@ -61,31 +95,15 @@
     return Number((candidates.find((candidate) => candidate * magnitude >= value) * magnitude).toPrecision(14));
   }
 
-  function cleanFloor(value) {
-    if (!Number.isFinite(value)) return 0;
-    if (value < 0) return -cleanCeiling(Math.abs(value));
-    if (value === 0) return 0;
-    const magnitude = 10 ** Math.floor(Math.log10(value));
-    const candidates = [1, 1.1, 1.25, 1.5, 2, 2.5, 3, 3.5, 4, 5, 6, 7.5, 8, 8.5, 9, 10];
-    return Number(([...candidates].reverse().find((candidate) => candidate * magnitude <= value) * magnitude).toPrecision(14));
-  }
-
   // Presentation-only bounds. `series` and `bands` are already filtered to
   // the lines currently visible in the chart.
-  function chartYAxisBounds({ series = [], bands = [], indexMode = false } = {}) {
+  function chartYAxisBounds({ series = [], bands = [] } = {}) {
     const values = finiteValues(series, bands);
     if (!values.length) return { min: 0, max: 1 };
-    const visibleMin = Math.min(...values);
     const visibleMax = Math.max(...values);
-    if (!indexMode) return { min: 0, max: cleanCeiling(Math.max(visibleMax, 0) * 1.1 || 1) };
-
-    const range = visibleMax - visibleMin;
-    const padding = range > 0 ? range * 0.1 : Math.max(Math.abs(visibleMax) * 0.1, 1);
-    const min = cleanFloor(visibleMin - padding);
-    const max = cleanCeiling(visibleMax + padding);
-    return max > min ? { min, max } : { min: min - 1, max: max + 1 };
+    return { min: 0, max: cleanCeiling(Math.max(visibleMax, 0) * 1.1 || 1) };
   }
 
-  return { UNITS_BY_REGION, unitForRegion, chartYAxisLabelForRegion, scenarioDeltaPct, shouldShowScenarioDelta, formatPercentagePointDelta,
-    nonNegativeAxisMinimum, chartYAxisBounds, cleanCeiling };
+  return { UNITS_BY_REGION, unitForRegion, chartYAxisLabelForRegion, chartLayoutForRegion, scenarioDeltaPct, shouldShowScenarioDelta, formatPercentagePointDelta,
+    optionalOverlayVisibility, setOptionalOverlaysVisible, nonNegativeAxisMinimum, chartYAxisBounds, cleanCeiling };
 });

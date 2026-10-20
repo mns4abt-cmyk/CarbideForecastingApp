@@ -96,7 +96,12 @@ body {
   flex-wrap: wrap;
 }
 .chart-col { flex: 2 1 620px; display: flex; flex-direction: column; gap: 20px; min-width: 0; }
-.news-col { flex: 1 1 320px; min-width: 300px; }
+.news-col {
+  flex: 1 1 320px;
+  min-width: 300px;
+  transition: flex-basis 280ms ease, min-width 280ms ease, max-width 280ms ease;
+}
+.news-col.is-collapsed { flex: 0 0 48px; min-width: 48px; max-width: 48px; }
 
 .card {
   background: var(--card-bg);
@@ -118,6 +123,7 @@ body {
 .region-btn.active { background: var(--accent); color: #fff; }
 
 /* ---------- Scenario toggles ---------- */
+.chart-overlay-controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 6px; }
 .scenario-toggles { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 6px; }
 .scenario-chip {
   display: flex; align-items: center; gap: 6px;
@@ -129,10 +135,18 @@ body {
 .scenario-chip .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
 .scenario-chip.disabled { opacity: 0.65; cursor: default; }
 .scenario-chip.highlighted { border-color: var(--accent); background: #eef2ff; }
+.overlay-master-toggle { font: inherit; font-weight: 600; }
+.overlay-master-toggle[data-state="mixed"] { border-color: #aeb8c7; background: #f5f7fa; color: var(--text-muted); }
 
 /* ---------- Chart ---------- */
 .chart-wrap { position: relative; width: 100%; height: 380px; margin-top: 6px; }
-#priceChart { width: 100%; height: 100%; display: block; }
+.chart-wrap svg { width: 100%; height: 100%; display: block; }
+.both-chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.both-chart-grid[hidden] { display: none; }
+.market-chart-panel { min-width: 0; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: #fcfcfd; }
+.market-chart-panel h3 { margin: 0 0 4px; font-size: 0.9rem; }
+.market-chart-panel h3 span { color: var(--text-muted); font-size: 0.75rem; font-weight: 500; }
+.market-chart-panel .chart-wrap { height: 350px; }
 .chart-axis-label { font-size: 10.5px; fill: #8b94a3; font-family: inherit; }
 .chart-axis-title { font-size: 11px; fill: #6b7789; font-family: inherit; font-weight: 600; }
 .chart-today-label { font-size: 10.5px; fill: #6b7789; font-family: inherit; font-weight: 600; }
@@ -338,6 +352,23 @@ body {
 
 /* ---------- News / Voices of the market ---------- */
 .news-sub { margin: 0 0 14px; font-size: 0.82rem; color: var(--text-muted); }
+.news-card { position: relative; min-width: 0; overflow: hidden; }
+.news-card .card-header { margin-bottom: 14px; }
+.news-card .card-header h2 { min-width: 0; transition: width 280ms ease, opacity 180ms ease, transform 280ms ease; }
+#newsSectionContent { min-width: 280px; transition: opacity 180ms ease, transform 280ms ease; }
+.news-col.is-collapsed .news-card .card-header { min-height: 0; margin-bottom: 0; }
+.news-col.is-collapsed .news-card .card-header h2 { width: 0; margin: 0; overflow: hidden; white-space: nowrap; opacity: 0; transform: translateX(24px); }
+.news-col.is-collapsed #newsSectionContent { visibility: hidden; opacity: 0; pointer-events: none; transform: translateX(100%); transition: opacity 180ms ease, transform 280ms ease, visibility 0s linear 280ms; }
+.section-toggle {
+  border: 1px solid var(--border); border-radius: 999px; padding: 5px 10px;
+  background: #fff; color: var(--text-muted); font: inherit; font-size: 0.76rem; font-weight: 600; cursor: pointer;
+}
+.news-col.is-collapsed .section-toggle {
+  position: absolute; inset: 8px 4px; display: flex; align-items: center; justify-content: center;
+  padding: 8px 4px; border-radius: 10px; writing-mode: vertical-rl; white-space: nowrap;
+}
+.section-toggle:hover { border-color: #c6cddb; color: var(--text); }
+.section-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .news-list { display: flex; flex-direction: column; gap: 12px; max-height: 900px; overflow-y: auto; padding-right: 4px; }
 .news-item {
   border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; cursor: pointer;
@@ -367,6 +398,8 @@ body {
 @media (max-width: 900px) {
   .layout { flex-direction: column; }
   .news-col { min-width: 0; width: 100%; }
+  .news-col.is-collapsed { flex: 0 0 auto; align-self: flex-end; width: 48px; min-width: 48px; max-width: 48px; }
+  .both-chart-grid { grid-template-columns: 1fr; }
   .timeline-outcomes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .timeline-controls { align-items: stretch; }
   .timeline-chart-heading { align-items: flex-start; flex-direction: column; }

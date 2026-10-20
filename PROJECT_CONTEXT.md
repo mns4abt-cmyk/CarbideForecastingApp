@@ -2,7 +2,7 @@
 
 ## Stable domain rules
 - EU price unit: **USD/mtu WO3**. China price unit: **CNY/kg APT**.
-- Do not compare raw EU and China prices on one axis. In `both` mode the UI normalizes each series to an index with the final historical value = 100.
+- Do not compare raw EU and China prices on one axis. In `both` mode the UI shows separate side-by-side native-price charts for China and EU, each with its own unit and Y-axis.
 - Numerical baseline forecasts must come from statistical/time-series models selected by walk-forward backtesting; an LLM must never generate prices, price targets, percentage changes, or forecast paths.
 - LLM output is limited to structured news classification plus a separate prose-only News-Lage overview; the overview never changes classification, deterministic News-Lage labels, or numerical forecasts.
 - In LLM classifications, `direction` means tungsten/APT **price** pressure only: bullish = upward, bearish = downward, neutral = no clear price pressure; it never means favourable/unfavourable industry sentiment.

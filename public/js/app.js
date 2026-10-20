@@ -4,6 +4,9 @@
   const state = {
     region: "both", // 'china' | 'eu' | 'both'
     activeScenarios: new Set(D.SCENARIOS.map((s) => s.id)),
+    showUncertaintyBand: true,
+    currentMarketInitialized: D.SCENARIOS.some((scenario) => scenario.id === "currentMarket"),
+    newsSectionExpanded: false,
     highlightScenarios: null, // set by clicking a news item
     selectedNewsId: null,
     selectedOutcomeEventKey: null,
@@ -16,11 +19,24 @@
     unitDisplay: document.getElementById("unitDisplay"),
     regionToggle: document.getElementById("regionToggle"),
     scenarioToggles: document.getElementById("scenarioToggles"),
+    uncertaintyBandToggle: document.getElementById("uncertaintyBandToggle"),
+    overlayVisibilityMaster: document.getElementById("overlayVisibilityMaster"),
     chartSvg: document.getElementById("priceChart"),
     chartTooltip: document.getElementById("chartTooltip"),
     chartLegend: document.getElementById("chartLegend"),
+    singleChartView: document.getElementById("singleChartView"),
+    bothCharts: document.getElementById("bothCharts"),
+    chinaChartSvg: document.getElementById("chinaPriceChart"),
+    chinaChartTooltip: document.getElementById("chinaChartTooltip"),
+    chinaChartLegend: document.getElementById("chinaChartLegend"),
+    euChartSvg: document.getElementById("euPriceChart"),
+    euChartTooltip: document.getElementById("euChartTooltip"),
+    euChartLegend: document.getElementById("euChartLegend"),
     insightsList: document.getElementById("insightsList"),
     newsList: document.getElementById("newsList"),
+    newsColumn: document.getElementById("newsColumn"),
+    newsSectionToggle: document.getElementById("newsSectionToggle"),
+    newsSectionContent: document.getElementById("newsSectionContent"),
     refreshBtn: document.getElementById("refreshBtn"),
     aiStatusPill: document.getElementById("aiStatusPill"),
     toast: document.getElementById("toast"),
@@ -70,7 +86,8 @@
   }
 
   function updateUnitDisplay() {
-    els.unitDisplay.textContent = `Einheit: ${window.ForecastPresentation.unitForRegion(state.region)}`;
+    const label = state.region === "both" ? "Einheiten" : "Einheit";
+    els.unitDisplay.textContent = `${label}: ${window.ForecastPresentation.unitForRegion(state.region)}`;
   }
 
   function lighten(hex, amount) {
@@ -101,20 +118,12 @@
   }
 
   // ---- Chart-Konfiguration bauen -----------------------------------
-  // Raw EU (USD/mtu WO3) und China (CNY/kg APT) Preise sind unterschiedliche Einheiten und
-  // dürfen bei "Beide" nicht direkt auf derselben Y-Achse verglichen werden. Für diesen Fall
-  // wird jede Serie rein zur Anzeige auf einen Index (letzter Historienwert = 100) umgerechnet;
-  // die Rohdaten in D bleiben unverändert.
-  function toIndex(data, lastValue) {
-    if (!lastValue) return data.map(() => null);
-    return data.map((v) => (v === null || v === undefined ? null : (v / lastValue) * 100));
-  }
-
-  function buildSeries() {
+  // China und EU bleiben in ihren nativen Einheiten. In der Beide-Ansicht
+  // erhält jeder Markt einen eigenen Chart und eine eigene Y-Achse.
+  function buildSeries(region) {
     const series = [];
-    const showChina = state.region === "china" || state.region === "both";
-    const showEu = state.region === "eu" || state.region === "both";
-    const indexMode = state.region === "both";
+    const showChina = region === "china";
+    const showEu = region === "eu";
     const hasHighlight = !!(state.highlightScenarios && state.highlightScenarios.length);
 
     if (showChina) {
@@ -125,7 +134,7 @@
         color: "#101c33",
         dashed: false,
         emphasize: true,
-        data: indexMode ? toIndex(raw, D.LAST_CHINA) : raw,
+        data: raw,
       });
     }
     if (showEu) {
@@ -136,7 +145,7 @@
         color: "#3a4a63",
         dashed: false,
         emphasize: true,
-        data: indexMode ? toIndex(raw, D.LAST_EU) : raw,
+        data: raw,
       });
     }
 
@@ -156,7 +165,7 @@
           dashed: true,
           faded,
           emphasize: isHL,
-          data: indexMode ? toIndex(raw, D.LAST_CHINA) : raw,
+          data: raw,
         });
       }
       if (showEu) {
@@ -170,7 +179,7 @@
           dashed: true,
           faded,
           emphasize: isHL,
-          data: indexMode ? toIndex(raw, D.LAST_EU) : raw,
+          data: raw,
         });
       }
     });
@@ -178,14 +187,12 @@
     return series;
   }
 
-  // Baseline-Unsicherheitsband (P10/P90) je aktiver Region, um die Modellprognose (P50) - dieselbe
-  // Anker-/Index-Logik wie buildSeries() (letzter realer Wert als Übergangspunkt, Index-Skalierung
-  // im "Beide"-Modus), damit Band und Basis-Linie exakt zusammenpassen.
-  function buildBaselineBands() {
+  // Baseline-Unsicherheitsband (P10/P90) je Markt, mit demselben
+  // Übergangspunkt wie die zugehörige P50-Basislinie.
+  function buildBaselineBands(region) {
     if (!D.BASELINE) return [];
-    const indexMode = state.region === "both";
-    const showChina = state.region === "china" || state.region === "both";
-    const showEu = state.region === "eu" || state.region === "both";
+    const showChina = region === "china";
+    const showEu = region === "eu";
 
     function anchor(forecastValues, lastValue) {
       const data = Array(HIST_COUNT - 1).fill(null);
@@ -200,9 +207,9 @@
         id: `baseline-${region}`,
         regionLabel: region === "china" ? "CN" : "EU",
         color,
-        p10: indexMode ? toIndex(p10, lastValue) : p10,
-        p50: indexMode ? toIndex(p50, lastValue) : p50,
-        p90: indexMode ? toIndex(p90, lastValue) : p90,
+        p10,
+        p50,
+        p90,
       };
     }
 
@@ -212,27 +219,98 @@
     return bands;
   }
 
-  function renderChart() {
-    const series = buildSeries();
-    const bands = buildBaselineBands();
-    const unit = state.region === "eu" ? "USD/mtu WO3"
-      : state.region === "china" ? "CNY/kg APT"
-      : "Index (Today = 100)";
-    const yAxisLabel = window.ForecastPresentation.chartYAxisLabelForRegion(state.region);
-    window.renderPriceChart(els.chartSvg, els.chartTooltip, {
+  function renderMarketChart(region, svg, tooltip, legend) {
+    const series = buildSeries(region);
+    const baselineBands = buildBaselineBands(region);
+    const bands = state.showUncertaintyBand ? baselineBands : [];
+    const unit = window.ForecastPresentation.unitForRegion(region);
+    const yAxisLabel = window.ForecastPresentation.chartYAxisLabelForRegion(region);
+    window.renderPriceChart(svg, tooltip, {
       labels: ALL_LABELS,
       historyCount: HIST_COUNT,
       series,
       bands,
+      tooltipBands: baselineBands,
       unit,
       yAxisLabel,
-      indexMode: state.region === "both",
     });
-    renderLegend(series);
+    renderLegend(legend, series);
   }
 
-  function renderLegend(series) {
-    els.chartLegend.innerHTML = series
+  function renderChart() {
+    const layout = window.ForecastPresentation.chartLayoutForRegion(state.region);
+    els.singleChartView.hidden = layout.mode !== "single";
+    els.bothCharts.hidden = layout.mode !== "both";
+
+    if (layout.mode === "both") {
+      renderMarketChart("china", els.chinaChartSvg, els.chinaChartTooltip, els.chinaChartLegend);
+      renderMarketChart("eu", els.euChartSvg, els.euChartTooltip, els.euChartLegend);
+      return;
+    }
+    renderMarketChart(layout.market, els.chartSvg, els.chartTooltip, els.chartLegend);
+  }
+
+  function wireUncertaintyBandToggle() {
+    els.uncertaintyBandToggle.checked = state.showUncertaintyBand;
+    els.uncertaintyBandToggle.addEventListener("change", (event) => {
+      state.showUncertaintyBand = event.target.checked;
+      renderChart();
+      updateOverlayVisibilityMaster();
+    });
+  }
+
+  function optionalScenarioIds() {
+    return D.SCENARIOS.filter((scenario) => !scenario.alwaysOn).map((scenario) => scenario.id);
+  }
+
+  function optionalOverlayVisibility() {
+    return window.ForecastPresentation.optionalOverlayVisibility({
+      showUncertaintyBand: state.showUncertaintyBand,
+      activeScenarioIds: state.activeScenarios,
+      optionalScenarioIds: optionalScenarioIds(),
+    });
+  }
+
+  function updateOverlayVisibilityMaster() {
+    const visibility = optionalOverlayVisibility();
+    const master = els.overlayVisibilityMaster;
+    master.dataset.state = visibility.state;
+    master.setAttribute("aria-pressed", visibility.state === "all" ? "true" : "false");
+    if (visibility.state === "all") {
+      master.textContent = "Alle ausblenden";
+      master.title = "Alle optionalen Chart-Ebenen ausblenden";
+    } else if (visibility.state === "none") {
+      master.textContent = "Alle anzeigen";
+      master.title = "Alle optionalen Chart-Ebenen anzeigen";
+    } else {
+      master.textContent = "Teilweise sichtbar · Alle anzeigen";
+      master.title = "Einige optionale Chart-Ebenen sind sichtbar; alle anzeigen";
+    }
+  }
+
+  function setAllOptionalOverlaysVisible(visible) {
+    const next = window.ForecastPresentation.setOptionalOverlaysVisible({
+      activeScenarioIds: state.activeScenarios,
+      optionalScenarioIds: optionalScenarioIds(),
+    }, visible);
+    state.showUncertaintyBand = next.showUncertaintyBand;
+    state.activeScenarios = next.activeScenarioIds;
+    els.uncertaintyBandToggle.checked = state.showUncertaintyBand;
+    if (els.currentMarketToggle) els.currentMarketToggle.checked = state.activeScenarios.has("currentMarket");
+    renderScenarioToggles();
+    renderChart();
+    renderInsights();
+    updateOverlayVisibilityMaster();
+  }
+
+  function wireOverlayVisibilityMaster() {
+    els.overlayVisibilityMaster.addEventListener("click", () => {
+      setAllOptionalOverlaysVisible(optionalOverlayVisibility().state !== "all");
+    });
+  }
+
+  function renderLegend(legend, series) {
+    legend.innerHTML = series
       .map((s) => `
         <span class="legend-item" style="color:${s.color}">
           <span class="legend-swatch ${s.dashed ? "dashed" : ""}" style="background:${s.dashed ? "none" : s.color}"></span>
@@ -269,6 +347,7 @@
         else state.activeScenarios.delete(id);
         renderChart();
         renderInsights();
+        updateOverlayVisibilityMaster();
       });
     });
   }
@@ -463,7 +542,10 @@
     els.currentMarketSummary.textContent = sc.summary || "";
 
     // Standardmäßig im Chart sichtbar, sobald sie erstmalig erscheint (z.B. nach dem ersten Refresh).
-    if (!state.activeScenarios.has("currentMarket")) state.activeScenarios.add("currentMarket");
+    if (!state.currentMarketInitialized) {
+      state.activeScenarios.add("currentMarket");
+      state.currentMarketInitialized = true;
+    }
     els.currentMarketToggle.checked = state.activeScenarios.has("currentMarket");
 
     if (!els.currentMarketToggle.dataset.wired) {
@@ -472,6 +554,7 @@
         if (e.target.checked) state.activeScenarios.add("currentMarket");
         else state.activeScenarios.delete("currentMarket");
         renderChart();
+        updateOverlayVisibilityMaster();
       });
     }
   }
@@ -545,6 +628,24 @@
   }
 
   // ---- News / Voices of the Market ----------------------------------
+  function updateNewsSectionVisibility() {
+    const collapsed = !state.newsSectionExpanded;
+    els.newsColumn.classList.toggle("is-collapsed", collapsed);
+    els.newsSectionContent.setAttribute("aria-hidden", String(collapsed));
+    els.newsSectionContent.inert = collapsed;
+    els.newsSectionToggle.setAttribute("aria-expanded", String(state.newsSectionExpanded));
+    els.newsSectionToggle.textContent = state.newsSectionExpanded ? "Einklappen" : "Ausklappen";
+    els.newsSectionToggle.setAttribute("aria-label", `Stimmen des Marktes ${state.newsSectionExpanded ? "einklappen" : "ausklappen"}`);
+  }
+
+  function wireNewsSectionToggle() {
+    updateNewsSectionVisibility();
+    els.newsSectionToggle.addEventListener("click", () => {
+      state.newsSectionExpanded = !state.newsSectionExpanded;
+      updateNewsSectionVisibility();
+    });
+  }
+
   function renderNews() {
     if (!D.NEWS.length) {
       els.newsList.innerHTML = `<p class="news-empty">Aktuell keine Meldungen verfügbar. Klicke auf "Aktualisieren", um konfigurierte Nachrichtenquellen abzurufen.</p>`;
@@ -672,6 +773,7 @@
 
       renderScenarioToggles();
       renderCurrentMarketCard();
+      updateOverlayVisibilityMaster();
       renderHistoricalAssociations();
       renderHistoricalEventTimeline();
       renderEvidenceFusion();
@@ -703,9 +805,13 @@
   function init() {
     els.lastUpdate.textContent = fmtDateTime(new Date());
     wireRegionToggle();
+    wireUncertaintyBandToggle();
+    wireOverlayVisibilityMaster();
+    wireNewsSectionToggle();
     updateUnitDisplay();
     wireEvidenceFusionHorizons();
     renderScenarioToggles();
+    updateOverlayVisibilityMaster();
     renderHistoricalAssociations();
     renderHistoricalEventTimeline();
     renderEvidenceFusion();

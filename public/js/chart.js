@@ -14,7 +14,7 @@
   /**
    * @param {SVGSVGElement} svg
    * @param {HTMLElement} tooltipEl
-  * @param {object} cfg { labels, historyCount, series:[{id,label,color,dashed,data[]}], unit, yAxisLabel, indexMode,
+  * @param {object} cfg { labels, historyCount, series:[{id,label,color,dashed,data[]}], unit, yAxisLabel,
    *                        bands:[{id,regionLabel,color,p10[],p50[],p90[]}] }
    */
   function renderPriceChart(svg, tooltipEl, cfg) {
@@ -30,12 +30,13 @@
 
     const { labels, historyCount, series, unit } = cfg;
     const bands = cfg.bands || [];
+    const tooltipBands = cfg.tooltipBands || bands;
     const n = labels.length;
 
     // Series and bands are built from enabled controls only. Native price axes
-    // start at zero; the index comparison chart keeps its own padded domain.
+    // start at zero and scale independently for each market chart.
     const { min, max } = window.ForecastPresentation.chartYAxisBounds({
-      series, bands, indexMode: cfg.indexMode,
+      series, bands,
     });
 
     const x = (i) => margin.left + (innerW * i) / (n - 1);
@@ -150,11 +151,11 @@
       cursorLine.setAttribute("x2", x(idx));
       cursorLine.setAttribute("visibility", "visible");
 
-      const baselineRows = bands
+      const baselineRows = tooltipBands
         .filter((b) => b.p10[idx] != null && b.p50[idx] != null && b.p90[idx] != null)
         .map((b) => `
           <div class="tt-baseline">
-            <div class="tt-baseline-title">Baseline${bands.length > 1 ? ` (${b.regionLabel})` : ""}:</div>
+            <div class="tt-baseline-title">Baseline${tooltipBands.length > 1 ? ` (${b.regionLabel})` : ""}:</div>
             <div class="tt-row">P10: <b>${b.p10[idx].toFixed(1)} ${unit}</b></div>
             <div class="tt-row">P50: <b>${b.p50[idx].toFixed(1)} ${unit}</b></div>
             <div class="tt-row">P90: <b>${b.p90[idx].toFixed(1)} ${unit}</b></div>

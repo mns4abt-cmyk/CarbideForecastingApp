@@ -18,7 +18,7 @@
     </div>
     <div class="header-meta">
       <span class="meta-pill">Letzte Aktualisierung: <b id="lastUpdate"></b></span>
-      <span class="meta-pill meta-pill-muted" id="unitDisplay">Einheit: Index (Heute = 100)</span>
+      <span class="meta-pill meta-pill-muted" id="unitDisplay">Einheiten: China CNY/kg APT | EU USD/mtu WO₃</span>
       <span class="meta-pill meta-pill-ai" id="aiStatusPill" hidden></span>
       <button id="refreshBtn" class="refresh-btn" type="button">
         <span class="refresh-icon">⟳</span> Aktualisieren
@@ -40,14 +40,43 @@
           </div>
         </div>
 
+        <div class="chart-overlay-controls">
+          <button id="overlayVisibilityMaster" class="scenario-chip overlay-master-toggle" type="button" data-state="all" aria-pressed="true">
+            Alle ausblenden
+          </button>
+          <label class="scenario-chip uncertainty-toggle">
+            <input type="checkbox" id="uncertaintyBandToggle" checked />
+            Unsicherheitsbereich anzeigen
+          </label>
+        </div>
         <div class="scenario-toggles" id="scenarioToggles"></div>
 
-        <div class="chart-wrap">
-          <svg id="priceChart"></svg>
-          <div id="chartTooltip" class="chart-tooltip"></div>
+        <div id="singleChartView">
+          <div class="chart-wrap">
+            <svg id="priceChart"></svg>
+            <div id="chartTooltip" class="chart-tooltip"></div>
+          </div>
+          <div class="legend" id="chartLegend"></div>
         </div>
 
-        <div class="legend" id="chartLegend"></div>
+        <div id="bothCharts" class="both-chart-grid" hidden>
+          <section class="market-chart-panel" aria-labelledby="chinaChartTitle">
+            <h3 id="chinaChartTitle">China <span>CNY/kg APT</span></h3>
+            <div class="chart-wrap">
+              <svg id="chinaPriceChart"></svg>
+              <div id="chinaChartTooltip" class="chart-tooltip"></div>
+            </div>
+            <div class="legend" id="chinaChartLegend"></div>
+          </section>
+          <section class="market-chart-panel" aria-labelledby="euChartTitle">
+            <h3 id="euChartTitle">EU <span>USD/mtu WO₃</span></h3>
+            <div class="chart-wrap">
+              <svg id="euPriceChart"></svg>
+              <div id="euChartTooltip" class="chart-tooltip"></div>
+            </div>
+            <div class="legend" id="euChartLegend"></div>
+          </section>
+        </div>
         <p class="chart-note">Forecast intervals reflect model uncertainty. Scenarios are historically calibrated stress / what-if paths.</p>
       </div>
 
@@ -123,11 +152,18 @@
 
     </section>
 
-    <aside class="news-col">
+    <aside class="news-col is-collapsed" id="newsColumn">
       <div class="card news-card">
-        <h2>Stimmen des Marktes</h2>
+        <div class="card-header">
+          <h2>Stimmen des Marktes</h2>
+          <button id="newsSectionToggle" class="section-toggle" type="button" aria-controls="newsSectionContent" aria-expanded="false" aria-label="Stimmen des Marktes ausklappen">
+            Ausklappen
+          </button>
+        </div>
+        <div id="newsSectionContent" aria-hidden="true" inert>
         <p class="news-sub">Wichtigste Marktmeldungen. Anklicken hebt zugehörige Szenarien im Chart hervor.</p>
         <div id="newsList" class="news-list"></div>
+        </div>
       </div>
     </aside>
 
