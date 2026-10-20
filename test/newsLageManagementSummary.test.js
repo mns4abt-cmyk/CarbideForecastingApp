@@ -44,13 +44,21 @@ test("populated summaries retain independent market labels/counts, select five e
 });
 test("sparse and empty states use selected article content or disclose missing content", (t) => {
   const sparse = setup(t).load();
+<<<<<<< HEAD
   assert.match(sparse.managementSummary.china.text, /china event 0/);
+=======
+  assert.ok(sparse.managementSummary.china.text.includes("china event"));
+>>>>>>> a9de8e74112d916aa11c9a520c473c5144d2ac64
   const empty = setup(t, 0).load();
   for (const market of ["china", "eu"]) {
     assert.equal(empty.managementSummary[market].status, "empty");
     assert.equal(empty.managementSummary[market].totalEventCount, 0);
     assert.deepEqual(empty.managementSummary[market].topEvents, []);
+<<<<<<< HEAD
     assert.ok(empty.managementSummary[market].text.includes("nicht genügend Artikeldaten"));
+=======
+    assert.ok(empty.managementSummary[market].text.includes("No selected news content"));
+>>>>>>> a9de8e74112d916aa11c9a520c473c5144d2ac64
   }
 });
 test("unavailable DB yields unavailable summaries with null counts", () => {

@@ -112,9 +112,9 @@ test("News-Lage v2 API shape is sourced from the persisted 30-day event history"
       updatedAt: REFERENCE_TIME,
     }]);
     assert.deepEqual(Object.keys(result.events.china[0]).sort(), [
-      "category", "chinaRelevance", "confidence", "direction", "duplicateCount", "effectiveMarketRelevance",
+      "category", "chinaRelevance", "confidence", "demandEffect", "direction", "duplicateCount", "effectiveMarketRelevance",
       "euRelevance", "eventId", "eventKey", "eventStage", "evidenceMaturity", "finalWeight", "firstSeenAt", "globalRelevance",
-      "priceOutcomes", "publishedAt", "severity", "sourceCount", "sources", "title",
+      "priceOutcomes", "publishedAt", "severity", "sourceCount", "sources", "supplyEffect", "title",
     ]);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
@@ -137,10 +137,17 @@ test("News-Lage v2 database failures are unavailable but non-throwing", () => {
 
 test("refresh wires News-Lage v2 after persistence without feeding Fusion or scenarios", () => {
   const source = fs.readFileSync(path.join(__dirname, "..", "server.js"), "utf8");
+<<<<<<< HEAD
   assert.match(source, /const newsLage = loadNewsLageV2\(\{/);
   assert.match(source, /newsLage: managementNewsLage/);
   assert.match(source, /addOllamaNewsLageSummaries\(newsLage/);
   assert.ok(source.indexOf("persistValidatedEvents(eventEvidence") < source.indexOf("const newsLage = loadNewsLageV2"));
   const newsLageCall = source.match(/const newsLage = loadNewsLageV2\(\{[\s\S]*?\}\);/)?.[0] || "";
+=======
+  assert.match(source, /const newsLage = await summarizeNewsLage\(loadNewsLageV2\(\{/);
+  assert.match(source, /newsLage,/);
+  assert.ok(source.indexOf("persistValidatedEvents(eventEvidence") < source.indexOf("const newsLage = await summarizeNewsLage(loadNewsLageV2"));
+  const newsLageCall = source.match(/const newsLage = await summarizeNewsLage\(loadNewsLageV2\(\{[\s\S]*?\}\);/)?.[0] || "";
+>>>>>>> a9de8e74112d916aa11c9a520c473c5144d2ac64
   assert.doesNotMatch(newsLageCall, /pipelineResult|scenarios|marketState|evidenceFusion/);
 });

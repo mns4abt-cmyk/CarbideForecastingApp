@@ -47,7 +47,11 @@ const { deduplicateEvents } = require("./lib/newsEventDedup");
 const { buildEventEvidence } = require("./lib/newsEventEvidence");
 const { persistValidatedEvents } = require("./lib/newsEventPersistence");
 const { loadNewsLageV2 } = require("./lib/newsLageV2");
+<<<<<<< HEAD
 const { addOllamaNewsLageSummaries } = require("./lib/newsLageOllamaSummary");
+=======
+const { summarizeNewsLage } = require("./lib/newsLageSummary");
+>>>>>>> a9de8e74112d916aa11c9a520c473c5144d2ac64
 const { loadStrategicMarketIntelligence } = require("./lib/strategicMarketIntelligenceIntegration");
 const { loadHistoricalEventOutcomeAssociations } = require("./lib/eventOutcomeAggregation");
 const { refreshPendingEventOutcomes } = require("./lib/eventOutcomePendingRefresh");
@@ -553,8 +557,9 @@ app.post("/api/refresh", async (req, res) => {
     // forecasting, Fusion, stress scenarios, and the legacy currentMarket API.
     const newsLageStartedAt = performance.now();
     console.info("[refresh]", JSON.stringify({ timestamp: new Date().toISOString(), stage: "sqlite_news_lage_readback", outcome: "start" }));
-    const newsLage = loadNewsLageV2({
+    const newsLage = await summarizeNewsLage(loadNewsLageV2({
       databasePath: path.join(appDir, "data", "news-events.db"),
+<<<<<<< HEAD
     });
     const managementNewsLage = await addOllamaNewsLageSummaries(newsLage, {
       fetch: LLM_PROVIDER === "ollama" ? fetch : null,
@@ -569,6 +574,10 @@ app.post("/api/refresh", async (req, res) => {
       timeoutMs: Math.max(30000, Math.min(45000, OLLAMA_TIMEOUT_MS)),
       available: LLM_PROVIDER === "ollama" && aiProvider.available,
     });
+=======
+    }), { fetch, baseUrl: OLLAMA_BASE_URL, model: OLLAMA_MODEL,
+      timeoutMs: OLLAMA_TIMEOUT_MS, cache: classificationCache });
+>>>>>>> a9de8e74112d916aa11c9a520c473c5144d2ac64
     console.info("[refresh]", JSON.stringify({
       timestamp: new Date().toISOString(), stage: "sqlite_news_lage_readback", outcome: "success",
       durationMs: Math.round(performance.now() - newsLageStartedAt),
